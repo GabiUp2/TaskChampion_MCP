@@ -146,13 +146,3 @@
   - `auto_generated_from_tasks` — when only tasks are analyzed
   This helps users understand the source and quality of the generated schema.
 - **Status:** Captured for v0.1.0 implementation
-
-### IDEA-006: Allow LLMs to save task plans into Taskwarrior and retrieve them
-- **Date:** 2026-05-25
-- **Author:** gabiup2
-- **Description:** Enable LLMs to save structured task plans (e.g., project roadmaps, task hierarchies, breakdown trees) into Taskwarrior, and later retrieve these plans as structured outputs. This would involve:
-  - A new tool to save a task plan (JSON or structured format) that creates multiple related tasks with dependencies
-  - A new tool to retrieve a task plan by project or by a plan identifier
-  - Support for plan metadata (plan name, description, created date, status)
-  - Integration with Taskwarrior's dependency system to represent task hierarchies
-- **Status:** Captured for future consideration (v0.2.0+)
