@@ -4,7 +4,7 @@
 
 [project]
 name = "taskchampion-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Model Context Protocol server for Taskwarrior 3.x, TaskChampion, and Timewarrior"
 readme = "README.md"
 license = "Apache-2.0"
