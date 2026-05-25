@@ -445,6 +445,47 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             )
         )
 
+    @mcp.tool()
+    def create_subtask(
+        parent_uuid: str,
+        description: str,
+        project: str = "",
+        priority: str = "",
+        tags: str = "",
+        due: str = "",
+        extra_fields: str = "",
+    ) -> str:
+        """Create a subtask with depends: linking to a parent task.
+
+        Args:
+            parent_uuid: UUID of the parent task this subtask depends on.
+            description: Task description (imperative, actionable).
+            project: Project name in dot-notation (e.g. 'work.acme').
+            priority: H, M, or L.
+            tags: Comma-separated tags (e.g. 'python,docker').
+            due: Due date (ISO format or Taskwarrior relative like 'eow').
+            extra_fields: JSON object of additional UDA fields.
+                Example: '{"scope": "personal", "phase": "impl"}'
+
+        The subtask will have a 'depends' field set to the parent UUID.
+        Call get_schema_info first to see required and available fields.
+        """
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+        udas: dict[str, str] = {}
+        if extra_fields:
+            udas = json.loads(extra_fields)
+        return json.dumps(
+            reg.create_subtask(
+                parent_uuid=parent_uuid,
+                description=description,
+                project=project,
+                priority=priority,
+                tags=tag_list,
+                due=due,
+                **udas,
+            )
+        )
+
 
 def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     """Register MANAGER-level tools (lifecycle control)."""

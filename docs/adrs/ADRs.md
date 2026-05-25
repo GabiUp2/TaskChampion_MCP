@@ -144,7 +144,7 @@ Use **Python** as the implementation language with the official `mcp` Python SDK
 # ADR 3: Transport — stdio First, HTTP/SSE Deferred
 
 **Date:** 2026-05-25
-**Status:** Accepted
+**Status:** Superseded by ADR 15 (2026-05-26)
 **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
 
 ## Context
@@ -534,3 +534,346 @@ The schema loader (`schema.py`) already handles quoted keys correctly via the st
 ### Cons
 - Quoted keys are slightly less readable in raw TOML files
 - Requires documentation for users editing schemas manually
+
+---
+
+# ADR 12: Testing Strategy — Three-Layer Pyramid with Per-Target E2E Matrix
+
+**Date:** 2026-05-26
+**Status:** Proposed
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+The server already has unit tests for `sanitizer`, `schema`, `schema_gen`, `config`, `rate_limiter`, and `onboarding` (see `tests/`). What is missing is (a) a documented strategy that defines what each layer covers, (b) integration tests that exercise the real `task` and `timew` binaries against an ephemeral data directory, and (c) a per-target end-to-end matrix that verifies feature symmetry across the seven IDE/host targets enumerated in ADR 15. Without that matrix the v1.0 promise of "same UX across all targets" cannot be enforced — only asserted.
+
+A second pressure is the subprocess boundary: most bugs in a CLI-wrapping MCP server live in argument construction and output parsing, neither of which is exercised by unit tests that mock `subprocess.run`. We need a layer that runs the real binaries.
+
+## Decision
+
+Adopt a three-layer test pyramid plus a per-target compatibility matrix:
+
+1. **Unit tests** (`tests/`, fast, run on every commit). Mock `subprocess.run` and the filesystem where helpful. Cover sanitizer rules, schema validation, rate limiter, config loading, audit log entry shape, role gating logic, and every branch in `tools.py` that does not require a real CLI. Coverage gate: 85% line coverage for `src/taskchampion_mcp/`.
+
+2. **Integration tests** (`tests/integration/`, run on every PR). Spin up an ephemeral Taskwarrior data directory by setting `TASKDATA` and `TASKRC` env vars to a pytest `tmp_path`. Use the real `task` and `timew` binaries from the test container. Cover every MCP tool against this real backend, including the dry-run and confirmation flows. Matrix: Python 3.10/3.11/3.12 × Taskwarrior 3.0 / 3.x-latest.
+
+3. **End-to-end target compatibility tests** (`tests/targets/`, run nightly and on every release tag). One subdirectory per target IDE (`neovim/`, `cursor/`, `windsurf/`, `vscode/`, `claude_desktop/`, `chatgpt/`, `codex/`). Each contains a script that drives the MCP server through the v1.0 acceptance matrix defined in `ROADMAP.md` and reports pass/fail per feature. Targets that cannot be automated headlessly (e.g. Claude Desktop) get a checklist runbook plus a recorded transcript.
+
+4. **Security regression tests** (`tests/security/`, run on every PR). A frozen corpus of problematic inputs (shell metacharacters, oversized payloads, malformed UUIDs, schema bypass attempts) verified against the sanitizer + tool layer. New CVE-like findings get added to the corpus; entries are never deleted.
+
+5. **Fixtures**: a gold dataset (`tests/fixtures/tasks/`) of representative task JSON exports — minimal, gtd, scrum, kanban, and the author's custom example — used by integration and e2e tests. Updated only when schema semantics change.
+
+CI configuration: GitHub Actions runs unit + integration + security on every PR. E2E target tests run on a nightly cron and on every `v*` tag push. A target that fails an e2e run blocks the release.
+
+## Alternatives Considered
+
+- **Two-layer (unit + e2e only)** — skipping integration tests pushes too much risk to e2e, which is slow and harder to debug. Integration catches subprocess argument bugs cheaply.
+- **Run real binaries in unit tests** — slows the inner loop and creates flakiness from binary version drift. Mocking at the unit layer keeps the loop fast.
+- **No per-target matrix, document parity instead** — the whole point of v1.0 is symmetric UX. Documentation drifts; tests don't.
+- **Single Python version in CI** — `uv`'s lockfile pins versions, but the project supports 3.10+. We catch typing/stdlib drift only by running the matrix.
+
+## Consequences
+
+### Pros
+- Subprocess argument and parsing bugs are caught at integration before they reach a target IDE
+- Per-target matrix makes v1.0 release gates objective and re-runnable
+- Security corpus grows over time as a regression net
+- Coverage gate keeps `tools.py` honest as it grows
+
+### Cons
+- Integration tests require `task` and `timew` binaries in the CI image — adds container build complexity
+- Some targets (Claude Desktop) cannot be driven headlessly and need manual runbooks — partial automation only
+- Nightly e2e cron incurs CI minute cost
+
+---
+
+# ADR 13: Observability — Two Streams, Structured Logs, Audit Log as Source of Truth
+
+**Date:** 2026-05-26
+**Status:** Proposed
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+ADR 9 mandates an audit log. The current implementation (`audit.py`) writes JSON lines to `~/.local/share/taskchampion-mcp/audit.log` and logs operational events via the standard `logging` module. Two questions are unresolved:
+
+1. What is the canonical shape of an audit entry, and is it stable enough for downstream tooling (KQL queries, log shippers, dashboards) to depend on?
+2. Where do operational logs go, given that stdio transport reserves stdout for the MCP protocol?
+
+A third concern: distributed tracing (OpenTelemetry, etc.) is increasingly expected in modern services. The MCP server is a single process per host, but spans across the LLM → MCP → CLI boundary have diagnostic value when something goes wrong.
+
+## Decision
+
+Maintain **two independent log streams** with strict separation:
+
+1. **Operational log** (process diagnostics) — written to **stderr only**. Never stdout (reserved for MCP protocol on stdio transport). Format: JSON Lines when stderr is not a TTY (machine-readable), human-readable text when stderr is a TTY (developer ergonomics). Level controlled by `TC_MCP_LOG_LEVEL` env var (defaults to `INFO`). Used for startup banners, CLI version detection, schema load notices, exceptions before a tool returns.
+
+2. **Audit log** (every tool invocation) — append-only JSON Lines to a file path resolved per ADR 16's config precedence. **Stable schema** (this ADR formalizes it):
+
+```json
+{
+  "timestamp": "2026-05-26T12:34:56.789Z",
+  "session_id": "abc123def456",
+  "tool": "create_task",
+  "parameters": { "...": "..." },
+  "result": "short summary string (≤500 chars)",
+  "result_code": "ok | dry_run | confirmation_required | rate_limit | validation_error | not_found | cli_error | internal_error",
+  "success": true,
+  "duration_ms": 12.3,
+  "pid": 12345,
+  "error": "optional error message (≤500 chars)"
+}
+```
+
+The `result_code` field is added (currently missing) and aligned with ADR 14's error taxonomy so audit logs are queryable by category.
+
+3. **Correlation**: each server process generates one `session_id` at startup. All entries within that process share it. This is sufficient for v1.0; cross-process correlation is deferred.
+
+4. **Tracing**: OpenTelemetry integration is **deferred**. If/when added, span context will be attached to the audit entry as an optional `trace_id` / `span_id` pair. No work in v1.0.
+
+5. **Log rotation**: not built into the server. Document a `logrotate` snippet in `docs/manuals/`. Re-evaluate native rotation in a future ADR if user feedback demands it.
+
+6. **Sensitive parameter handling**: the existing `_redact_long_values` truncates at 200 chars. Add field-name-based redaction matching `config.redacted_fields` so that sensitive UDA values never land in the audit log even if the LLM passes them.
+
+## Alternatives Considered
+
+- **Single combined log stream** — conflates "what the process is doing" with "what the LLM asked the process to do"; harder to query, harder to ship to SIEM
+- **stdout for operational logs** — breaks the MCP stdio protocol immediately
+- **Build native OpenTelemetry support in v1.0** — adds a dependency and configuration surface for marginal benefit at a single-process scale
+- **Native log rotation** — duplicates a solved problem (`logrotate`); adds dependency or careful file-locking code
+
+## Consequences
+
+### Pros
+- Audit log is the queryable source of truth for "what did the LLM do" — KQL, jq, log shippers all work against a stable schema
+- Stderr-only operational logs preserve the stdio protocol invariant
+- Adding `result_code` aligns audit log with the error model (ADR 14) — single source of truth for categorization
+- Deferring tracing keeps v1.0 dependency footprint small
+
+### Cons
+- Two destinations to configure and document
+- Schema change (`result_code`) is a minor breaking change for anyone already parsing the audit log — call it out in CHANGELOG
+- `logrotate` dependency is a Linux assumption; macOS users need an equivalent
+
+---
+
+# ADR 14: Error Model — Stable Envelope, Code-Tagged Categories, Explicit Retry Semantics
+
+**Date:** 2026-05-26
+**Status:** Proposed
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+Every tool in `tools.py` already returns either `_make_success(message, **extra)` or `_make_error(message)`. The envelope shape is consistent, but the error variant carries only a freeform `message` string. An LLM seeing `"error": true, "message": "Failed: Task abc not found"` cannot reliably distinguish a missing-resource error from a rate-limit error from a CLI failure without parsing English. That coupling is fragile.
+
+There is also no documented contract for what counts as "destructive" and therefore requires `dry_run` / confirmation. Today only `complete_task` and `delete_task` implement the dry-run/confirmation flow. `modify_task`, `undo`, `sync`, and future bulk operations are inconsistent.
+
+## Decision
+
+Define a single error model with three parts:
+
+### 1. Stable envelope
+
+Every MCP tool MUST return one of these two shapes. Exceptions are never propagated to the transport layer.
+
+```json
+// Success
+{ "success": true, "message": "...", "code": "ok | dry_run | confirmation_required", "<extra>": "..." }
+
+// Error
+{ "error": true, "message": "...", "code": "<category>", "details": { "<optional>": "..." } }
+```
+
+The `code` field is **new** and is added to both success and error envelopes. Existing callers that only check `success` / `error` continue to work; new callers can branch on `code` without parsing English.
+
+### 2. Error categories (closed set)
+
+| code | Meaning | Retryable? |
+|---|---|---|
+| `validation_error` | Sanitizer or schema validation rejected the input | No — fix args first |
+| `not_found` | Referenced UUID / project / preset does not exist | No |
+| `rate_limit` | Sliding-window cap exceeded | Yes, after wait (`details.retry_after_s` provided) |
+| `cli_error` | `task` or `timew` returned non-zero | Sometimes — depends on stderr |
+| `schema_unset` | First-run onboarding required before this tool can run | No — run onboarding flow |
+| `confirmation_required` | Destructive op needs second call | No — re-call with explicit confirm |
+| `dry_run` | Preview only, no execution occurred | N/A — not an error |
+| `internal_error` | Unhandled exception caught at the tool boundary | Yes, with backoff |
+
+Codes are stable identifiers. Adding a new code is a MINOR version bump (ADR 15). Removing or repurposing a code is a MAJOR version bump.
+
+### 3. Dry-run and confirmation contract
+
+A tool is **destructive** if it mutates Taskwarrior or Timewarrior state. By that definition, destructive tools are: `create_task`, `modify_task`, `annotate_task`, `complete_task`, `delete_task`, `start_task`, `stop_task`, `undo`, `sync`, and future `bulk_modify` / `batch_create_tasks`. (`save_initial_schema` mutates config and schema files — also destructive.)
+
+Every destructive tool MUST accept an optional `dry_run: bool` parameter (default resolved from `config.dry_run_default`, currently `false`). When `dry_run=true`, the tool returns `{success: true, code: "dry_run", message: "Would do X", preview: {...}}` and performs no mutation.
+
+`require_confirmation` (config) gates an additional confirmation step on **MANAGER-level lifecycle tools only** (`complete_task`, `delete_task`, `undo`, `bulk_modify`). When enabled and `dry_run=false`, the tool returns `{success: true, code: "confirmation_required", message: "..."}` on first call, expecting a second call with an explicit confirmation token in `details`.
+
+## Alternatives Considered
+
+- **Keep freeform messages only** — what we have today; LLMs cannot reliably branch on category without English parsing
+- **HTTP-style numeric codes (400, 404, 429, 500)** — familiar but the mapping to MCP semantics is lossy and adds translation work for both server and client
+- **Per-tool error enums** — proliferation of types; harder for the LLM to learn; harder to grep across the codebase
+- **Apply confirmation to all destructive tools** — would force confirmation on `modify_task` and `annotate_task`, which would be annoying for high-volume edits. Restricting to lifecycle keeps the friction proportional to the blast radius
+
+## Consequences
+
+### Pros
+- LLMs can branch on `code` without natural-language parsing
+- Adding tools is mechanical — pick a code, write the message
+- Aligns audit log (`result_code` per ADR 13) and tool output — one taxonomy
+- Dry-run becomes universal for destructive ops; predictable behavior across the surface
+
+### Cons
+- Adding `dry_run` to tools that currently lack it is a breaking parameter change — schedule for v1.0 alongside other breaking renames
+- Forces discipline: every new tool must declare its error codes
+- `cli_error` is broad — may need sub-codes later if Taskwarrior failure modes diversify
+
+---
+
+# ADR 15: Versioning and v1.0 Release — Multi-Transport, All-Targets Milestone (Supersedes ADR 3)
+
+**Date:** 2026-05-26
+**Status:** Proposed
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+ADR 3 deferred HTTP/SSE transport past v0.1.0 to focus on the five IDE targets that use stdio. With the project now committing to v1.0 = symmetric UX across all seven targets (Neovim, Cursor, Windsurf, VS Code, Claude Desktop, ChatGPT, Codex), the deferred transport must be in scope. ADR 3 is superseded.
+
+Beyond transport, we need an explicit SemVer policy, a deprecation policy for tools (since ADR 14 introduces several breaking renames), and a clear definition of what "v1.0" means as a release gate.
+
+## Decision
+
+### SemVer policy
+
+The MCP server follows strict SemVer:
+
+- **MAJOR** — any of: removed/renamed MCP tool, removed/renamed parameter, removed error code, removed config key, changed default role-permission semantics
+- **MINOR** — added MCP tool, added optional parameter, added error code, added schema preset, added config key with a safe default, added transport
+- **PATCH** — bug fix with no API contract change
+
+Schema preset versions (`[meta].version` in TOML) are independent of the server version.
+
+### MCP protocol pinning
+
+`server.json` records the MCP protocol version range the server supports. The Python `mcp` SDK dependency is pinned to a `~=` minor range. Upgrading SDK minor versions requires a PATCH release minimum and a CI run of the integration matrix.
+
+### Deprecation policy
+
+A tool, parameter, or error code marked Deprecated:
+
+1. Stays present and functional for at least one MINOR release after the Deprecated label appears in its docstring
+2. Emits a structured deprecation notice to the operational log (ADR 13) on first use per session
+3. Is removed only in the next MAJOR release
+4. Is documented in CHANGELOG.md under "Deprecated" with the replacement called out
+
+### v1.0 release gates
+
+v1.0 ships when ALL of the following are true:
+
+1. **Both transports supported**: stdio (existing) and Streamable HTTP / SSE (per the upstream MCP SDK)
+2. **All seven targets pass the v1.0 acceptance matrix** in `ROADMAP.md` (per ADR 12's e2e tests). Manual checklists are acceptable for targets that cannot be driven headlessly
+3. **HTTP/SSE auth story documented**: token-based auth with config-driven secret rotation; no auth required for stdio (process-bound)
+4. **Tool surface normalized**: naming inconsistencies from the design-system audit resolved (American spelling, dropped `timew_` prefix conflicts, JSON-string params replaced with native types)
+5. **Error model implemented**: ADR 14's `code` field present on every tool return; audit log `result_code` populated (ADR 13)
+6. **Config precedence implemented**: layer order per ADR 16; `--config-dump` flag available
+7. **Distribution**: published to PyPI and Official MCP Registry; install instructions verified for each target IDE
+8. **Security**: all ADR 9 features verified; security regression corpus (ADR 12) green
+9. **Documentation**: per-target installation guide, configuration reference, schema authoring guide, security model
+10. **CHANGELOG**: spans 0.x → 1.0 with explicit migration notes for every breaking change
+
+### Pre-v1.0 numbering
+
+Versions 0.x.y leading up to v1.0 follow normal SemVer with the relaxed convention that 0.x bumps may include breaking changes (per upstream SemVer guidance for 0.y.z series). The first stable contract is v1.0.0.
+
+## Alternatives Considered
+
+- **Keep ADR 3 and ship HTTP/SSE in v2.0** — punts the all-targets promise; ChatGPT/Codex users wait a major version
+- **Loose SemVer (move-fast-break-things in 1.x)** — destroys downstream trust; LLM tooling assumes stable contracts
+- **Per-target version numbers** — proliferates complexity; one server, one version
+- **Skip the v1.0 release gate matrix; ship when "ready"** — "ready" is unmeasurable; gates make the milestone concrete
+
+## Consequences
+
+### Pros
+- v1.0 is a measurable, gated milestone instead of a vibe
+- Strict SemVer protects downstream MCP clients
+- Deprecation policy creates a safe path to evolve the tool surface
+- Supersedes ADR 3 cleanly without leaving stale guidance in the registry
+
+### Cons
+- HTTP/SSE work pulled forward — increases v1.0 scope
+- Tool-renaming breaking changes must be coordinated into a single MAJOR boundary
+- Auth model for HTTP/SSE is its own design problem (likely future ADR)
+
+---
+
+# ADR 16: Configuration Precedence — Five Layers, Last Wins, Explicit Provenance
+
+**Date:** 2026-05-26
+**Status:** Proposed
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+Today `load_config()` reads a single TOML file at `~/.config/taskchampion-mcp/config.toml` (per ADR 6) and falls back to dataclass defaults. The roadmap calls for project-scoped configuration (`.taskchampion-mcp.toml` in the project root) and CI/automation users need a way to override settings without editing files. Without a documented precedence order, behavior becomes "wherever the developer happened to read first," which is exactly the class of bug ADR documentation is meant to prevent.
+
+A secondary concern: secrets. Auth tokens for the HTTP/SSE transport (per ADR 15) should never be required in a checked-in config file. Environment variables are the conventional answer, but only if precedence puts them above project config.
+
+## Decision
+
+Five layers, evaluated in order. Each later layer overrides earlier layers per key.
+
+1. **Hard-coded defaults** — `ServerConfig` dataclass values in `config.py`
+2. **User config** — `~/.config/taskchampion-mcp/config.toml` (XDG Base Dir, per ADR 6)
+3. **Project config** — `.taskchampion-mcp.toml` in the current working directory or the first ancestor containing a `.git/` directory (whichever comes first). Optional; missing file is not an error
+4. **Environment variables** — `TC_MCP_*` (e.g. `TC_MCP_ROLE`, `TC_MCP_SCHEMA`, `TC_MCP_AUDIT_LOG`, `TC_MCP_AUTH_TOKEN`). Snake-case env var → dotted config key (`TC_MCP_RATE_LIMIT_PER_MINUTE` → `security.rate_limit_per_minute`)
+5. **CLI flags** — passed to `taskchampion-mcp-server` (e.g. `--role MANAGER`, `--schema gtd`, `--config-dump`)
+
+### Merge semantics
+
+- **Scalar fields** (strings, ints, bools) — later layer replaces earlier
+- **List fields** (e.g. `redacted_fields`) — later layer **replaces** earlier (no merge). Predictability beats clever; users who want to extend can re-list values
+- **Unknown keys** — ignored with a WARNING in operational logs; never fail to start
+
+### Secret handling
+
+Sensitive values (HTTP/SSE auth tokens, future webhook secrets) MUST be settable via env var or CLI flag. They MAY appear in TOML config files but the documentation discourages it and the `--config-dump` output redacts them.
+
+### Provenance debugging
+
+A `--config-dump` CLI flag prints the effective config as JSON, annotated with the source layer per key:
+
+```json
+{
+  "server.role": { "value": "MANAGER", "source": "env:TC_MCP_ROLE" },
+  "server.schema": { "value": "gtd", "source": "file:~/.config/taskchampion-mcp/config.toml" },
+  "security.rate_limit_per_minute": { "value": 30, "source": "default" }
+}
+```
+
+This is the diagnostic tool of first resort when a user reports "I changed the config but nothing happened."
+
+## Alternatives Considered
+
+- **Single layer (user config only)** — what we have today; doesn't scale to multi-project users or CI
+- **Three layers (defaults / user / env)** — skips project config, which is on the v0.2.0 roadmap regardless
+- **Deep-merge lists** — clever, hard to debug, hides intent
+- **Read project config from a `pyproject.toml` table** — couples our config to Python packaging tools and to projects that don't have a `pyproject.toml`
+- **Use environment variables as primary, files as fallback** — flips the usual ergonomics; most users edit files, not env
+
+## Consequences
+
+### Pros
+- One documented order makes "where does this value come from" answerable
+- Env vars + CLI flags make CI and ephemeral overrides clean
+- `--config-dump` turns a class of support questions into a single command
+- Project config (roadmap item) slots in cleanly without re-litigating precedence
+- Secret handling story is consistent
+
+### Cons
+- Five layers is more surface than one — onboarding doc must explain it
+- Env var naming convention adds a translation step (`TC_MCP_RATE_LIMIT_PER_MINUTE` ↔ `[security] rate_limit_per_minute`)
+- CLI flag implementation requires wiring through `argparse` or `click` — small new dependency or stdlib effort

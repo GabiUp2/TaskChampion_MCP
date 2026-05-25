@@ -436,6 +436,101 @@ class ToolRegistry:
             self._log("create_task", params, "", False, 0, str(e))
             return _make_error(f"Create failed: {e}")
 
+    def create_subtask(
+        self,
+        parent_uuid: str,
+        description: str,
+        project: str = "",
+        priority: str = "",
+        tags: list[str] | None = None,
+        due: str = "",
+        **udas: str,
+    ) -> dict[str, Any]:
+        """Create a subtask with depends: linking to a parent task."""
+        params = {
+            "parent_uuid": parent_uuid,
+            "description": description,
+            "project": project,
+            "priority": priority,
+            "tags": tags,
+            **udas,
+        }
+        try:
+            self._guard_rate(is_create=True)
+
+            clean_parent_uuid = sanitize_uuid(parent_uuid)
+            parent_task = self.task.get_task(clean_parent_uuid)
+            if not parent_task:
+                self._log(
+                    "create_subtask",
+                    params,
+                    "parent not found",
+                    False,
+                    0,
+                    f"Parent task {clean_parent_uuid} not found",
+                )
+                return _make_error(f"Parent task {clean_parent_uuid} not found.")
+
+            clean_desc = sanitize_description(description)
+            task_data: dict[str, Any] = {
+                "description": clean_desc,
+                "depends": clean_parent_uuid,
+            }
+
+            if project:
+                task_data["project"] = sanitize_project(project)
+            if priority:
+                task_data["priority"] = sanitize_enum(priority, "priority", ["H", "M", "L"])
+            if due:
+                task_data["due"] = sanitize_field_value(due, "due")
+
+            clean_tags: list[str] = []
+            if tags:
+                clean_tags = [sanitize_tag(t) for t in tags]
+                task_data["tags"] = clean_tags
+
+            for key, value in udas.items():
+                if value:
+                    if key in self.schema.enum_fields():
+                        task_data[key] = sanitize_enum(value, key, self.schema.enum_fields()[key])
+                    else:
+                        task_data[key] = sanitize_field_value(value, key)
+
+            validation_errors = validate_task(task_data, self.schema)
+            if validation_errors:
+                self._log(
+                    "create_subtask",
+                    params,
+                    "validation failed",
+                    False,
+                    0,
+                    "; ".join(validation_errors),
+                )
+                return _make_error(f"Schema validation failed: {'; '.join(validation_errors)}")
+
+            cli_fields: dict[str, str] = {}
+            for key, value in task_data.items():
+                if key in ("description", "tags"):
+                    continue
+                cli_fields[key] = value
+            if clean_tags:
+                cli_fields["tags"] = clean_tags
+
+            result, ms = _timed_call(self.task.add_task, clean_desc, **cli_fields)
+            if result.ok:
+                self._log("create_subtask", params, result.stdout, True, ms)
+                return _make_success(
+                    f"Subtask created with parent {clean_parent_uuid}. {result.stdout.strip()}"
+                )
+            self._log("create_subtask", params, result.stderr, False, ms, result.stderr)
+            return _make_error(f"Create subtask failed: {result.stderr}")
+        except (RateLimitError, SanitizationError) as e:
+            self._log("create_subtask", params, "", False, 0, str(e))
+            return _make_error(str(e))
+        except Exception as e:
+            self._log("create_subtask", params, "", False, 0, str(e))
+            return _make_error(f"Create subtask failed: {e}")
+
     # -----------------------------------------------------------------------
     # MANAGER tools
     # -----------------------------------------------------------------------

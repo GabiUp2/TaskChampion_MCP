@@ -1,138 +1,226 @@
 # Feature Roadmap
 
-## v0.1.0 — Foundation (Released v0.2.0)
+> **North-star milestone — v1.0**: TaskChampion MCP is installed and feature-symmetric across all seven target IDEs/hosts (Neovim, Cursor, Windsurf, VS Code, Claude Desktop, ChatGPT, Codex). Both stdio and HTTP/SSE transports supported. Per ADR 15.
 
-The minimum viable MCP server: read, write, and manage tasks via LLM with security guardrails.
+This roadmap is organized around three release tracks:
 
-### Core MCP Tools
-
-**CONTRIBUTOR level** (read + annotate + modify):
-- [x] `get_initialisation_status` — inspect schema/taxonomy readiness before task mutations
-- [x] `propose_initialisation_options` — offer first-run choices: taxonomy, inference, hybrid, or preset
-- [x] `analyse_existing_tasks_for_schema` — read-only field/value analysis from `task export`
-- [x] `analyse_taxonomy_file` — parse taxonomy Markdown for field semantics and lifecycle rules
-- [x] `generate_initial_schema_preview` — generate reviewable schema TOML without writing files
-- [x] `save_initial_schema` — persist an approved schema and optionally update `config.toml`
-- [x] `list_tasks` — list/filter tasks via `task export` with optional filters
-- [x] `get_task` — get a single task by UUID with full field detail
-- [x] `search_tasks` — search tasks by description, project, tags, or UDA values
-- [x] `annotate_task` — add annotation to a task by UUID
-- [x] `modify_task` — modify fields on an existing task (description, tags, priority, UDAs)
-- [x] `start_task` / `stop_task` — toggle active time tracking on a task
-- [x] `get_projects` — list all projects in the task database
-- [x] `get_tags` — list all tags
-- [x] `get_active_context` — show current Taskwarrior context
-- [x] `timew_summary` — get Timewarrior time summary (today/week/month)
-- [x] `timew_status` — check if Timewarrior is currently tracking
-
-**GENERATOR level** (+ create):
-- [x] `create_task` — create a new task with schema validation
-- [ ] `create_subtask` — create a task with `depends:` linking to a parent
-- [ ] `batch_create_tasks` — create multiple related tasks in one call (with rate limiting)
-
-**MANAGER level** (+ lifecycle):
-- [x] `complete_task` — mark task as done (with confirmation mode)
-- [x] `delete_task` — delete a task (with confirmation mode)
-- [x] `undo` — undo last Taskwarrior operation
-- [x] `sync` — trigger `task sync`
-- [ ] `bulk_modify` — modify multiple tasks matching a filter (with dry-run + count confirmation)
-
-### Schema System
-- [x] Load and validate TOML schema presets
-- [x] Schema selection in config (`config.toml`)
-- [x] Conditional field requirement validation
-- [x] Schema auto-generation from existing tasks (`schema_gen.analyze_tasks`)
-- [x] Taxonomy file parsing for field descriptions and process rules (`schema_gen.parse_taxonomy`)
-- [x] Combined TOML schema generation from tasks + taxonomy (`schema_gen.generate_schema_toml`)
-- [x] `taxonomy_path` config option for taxonomy file location
-- [x] Runtime first-run onboarding tools for schema/taxonomy discovery and preview
-- [x] First-run wizard: detect existing tasks, propose schema, or guide creation
-
-### Security (ADR 9 — all required)
-- [x] Subprocess argument list enforcement (no `shell=True`)
-- [x] Input sanitization layer with allowlist patterns
-- [x] Rate limiting (configurable ops/min, creates/hour)
-- [x] Audit logging to `~/.local/share/taskchampion-mcp/audit.log`
-- [x] Dry-run mode for all write operations
-- [x] Confirmation mode for destructive operations (delete, done, bulk)
-- [x] Sensitive field redaction (configurable)
-
-### Infrastructure
-- [x] Python package with `pyproject.toml` (uv-compatible)
-- [x] `taskchampion-mcp-server` entry point (stdio transport)
-- [x] TOML configuration at `~/.config/taskchampion-mcp/config.toml`
-- [x] Taskwarrior version detection (3.x required, 2.x warns)
-- [x] Timewarrior detection (optional, tools register only if found)
-- [x] Role-based dynamic tool registration
-
-### Distribution & Publishing
-- [x] `server.json` for Official MCP Registry
-- [x] `mcp-name` marker in README for PyPI validation
-- [x] GitHub Actions CI workflow (`.github/workflows/ci.yml`)
-- [x] GitHub Actions publish workflow — PyPI + MCP Registry (`.github/workflows/publish.yml`)
-- [x] `./dev.sh publish` command for local publishing
-- [x] Community submission templates (`.github/MARKETPLACE_SUBMISSIONS.md`)
-- [ ] First PyPI release
-- [ ] First Official MCP Registry publication
-- [ ] mcp.so listing
-- [ ] awesome-mcp-servers PR
-
-### Testing
-- [x] Unit tests for input sanitization
-- [x] Unit tests for schema validation
-- [x] Unit tests for runtime onboarding and first-run schema preview/save flow
-- [ ] Unit tests for role-based tool filtering
-- [ ] Integration tests using gold dataset fixtures
-- [ ] Security tests using problematic input fixtures
-
-### Documentation
-- [ ] Installation guide for each supported IDE (NVIM, Cursor, Windsurf, VSC, Claude Desktop)
-- [ ] Configuration reference
-- [ ] Schema authoring guide
-- [ ] Security model documentation
+- **v0.x (Foundation)** — ship a usable stdio MCP server and feedback-driven iterations
+- **v1.0 (Multi-target Release)** — symmetric UX on all seven targets, both transports, all release gates met
+- **v1.x+ (Post-release)** — workflow features, ecosystem integrations, second-class targets
 
 ---
 
-## v0.2.0 — Enhanced Workflows (Released v0.3.0)
+## v0.2.0 — Released
 
-### New Tools
-- [ ] `get_task_report` — run named Taskwarrior reports (`task urgent`, `task focus`, etc.)
+This is the current release. It established the security baseline (ADR 9), the role system (ADR 5), schema presets (ADR 7), and the onboarding flow.
+
+### Core MCP tools
+
+**CONTRIBUTOR** (read + annotate + modify):
+- [x] `get_initialisation_status` — inspect schema/taxonomy readiness before task mutations
+- [x] `propose_initialisation_options` — first-run choices: taxonomy, inference, hybrid, or preset
+- [x] `analyse_existing_tasks_for_schema` — read-only field/value analysis from `task export`
+- [x] `analyse_taxonomy_file` — parse taxonomy Markdown for field semantics
+- [x] `generate_initial_schema_preview` — reviewable schema TOML without writes
+- [x] `save_initial_schema` — persist approved schema, optionally update `config.toml`
+- [x] `list_preset_schemas` / `use_preset_schema`
+- [x] `list_tasks` / `get_task` / `search_tasks`
+- [x] `annotate_task` / `modify_task`
+- [x] `start_task` / `stop_task`
+- [x] `get_projects` / `get_tags` / `get_active_context` / `get_schema_info`
+- [x] `timew_summary` / `timew_status` (registered only if Timewarrior present)
+
+**GENERATOR** (+ create):
+- [x] `create_task`
+
+**MANAGER** (+ lifecycle):
+- [x] `complete_task` (dry-run + confirmation)
+- [x] `delete_task` (dry-run + confirmation)
+- [x] `undo` / `sync`
+
+### Foundation
+
+- [x] Schema preset system (minimal, gtd, scrum, kanban, authors_custom_example)
+- [x] Security baseline per ADR 9 (sanitization, rate limits, audit log, dry-run, confirmation, redaction)
+- [x] XDG-compliant config + audit log paths
+- [x] Role-based dynamic tool registration
+- [x] Taskwarrior 3.x version detection, 2.x warning
+- [x] `server.json` for the Official MCP Registry
+- [x] GitHub Actions CI + publish workflow
+- [x] `dev.sh` developer ergonomics script
+
+---
+
+## v0.3.0 — Tool surface normalization and contract hardening
+
+**Theme**: Make the tool surface internally consistent before we promise stability at v1.0. Most items are intentionally breaking — better now than after v1.0.
+
+### Tool surface refactor (breaking)
+
+Resolves design-system audit findings (see commit history / changelog for full list).
+
+- [ ] Standardize on American spelling: `analyze_*`, `initialization`, `propose_initialization_options`
+- [ ] Drop JSON-string params: `modify_task.fields` → `dict`, `create_task.extra_fields` → `dict`, `create_task.tags` → `list[str]`
+- [ ] Lifecycle verb parallelism: `undo` → `undo_last_action`, `sync` → `sync_tasks`
+- [ ] Choose namespacing convention (recommend dropping `timew_` prefix; differentiate by docstring)
+- [ ] Rewrite `_build_instructions` role descriptions to acknowledge CONTRIBUTOR write surface (modify/annotate/start/stop)
+
+### Error model (ADR 14)
+
+- [ ] Add `code` field to every success and error envelope
+- [ ] Implement closed-set error categories: `validation_error`, `not_found`, `rate_limit`, `cli_error`, `schema_unset`, `confirmation_required`, `dry_run`, `internal_error`
+- [ ] Add `dry_run: bool` to every destructive tool (currently only on `complete_task`, `delete_task`)
+- [ ] Restrict `require_confirmation` to MANAGER lifecycle tools per ADR 14
+
+### Observability (ADR 13)
+
+- [ ] Add `result_code` to audit log entries
+- [ ] JSON Lines vs human stderr based on TTY detection
+- [ ] `TC_MCP_LOG_LEVEL` env var
+- [ ] Document `logrotate` snippet in `docs/manuals/`
+- [ ] Redact `config.redacted_fields` from audit log parameter dict
+
+### Config precedence (ADR 16)
+
+- [ ] Project config: `.taskchampion-mcp.toml` lookup (cwd → first ancestor with `.git/`)
+- [ ] Env var layer: `TC_MCP_*` → dotted config keys
+- [ ] CLI flags via `argparse`: `--role`, `--schema`, `--config-dump`
+- [ ] `--config-dump` prints effective config with source provenance per key
+
+### Testing (ADR 12)
+
+- [ ] Integration test layer (`tests/integration/`) using real `task` and `timew` against ephemeral `TASKDATA`
+- [ ] Security regression corpus (`tests/security/`)
+- [ ] Gold dataset fixtures per schema preset
+- [ ] CI matrix: Python 3.10/3.11/3.12 × TW 3.0/3.x-latest
+- [ ] Coverage gate at 85% for `src/taskchampion_mcp/`
+
+### Tooling additions
+
+- [ ] `create_subtask` (GENERATOR) — task with `depends:` linking to parent
+- [ ] `batch_create_tasks` (GENERATOR) — bulk create with rate-limit awareness
+- [ ] `bulk_modify` (MANAGER) — filter-based bulk modify with dry-run + count confirmation
+- [ ] `get_task_report` (CONTRIBUTOR) — named Taskwarrior reports
+
+---
+
+## v0.4.0 — HTTP/SSE transport and auth
+
+**Theme**: Add the second transport so ChatGPT and Codex become reachable. Stays pre-1.0 until target compatibility is verified.
+
+- [ ] Streamable HTTP transport via the upstream `mcp` SDK
+- [ ] SSE transport for real-time progress events
+- [ ] Token-based auth (`TC_MCP_AUTH_TOKEN`); rotation guide
+- [ ] Optional CIDR allowlist for HTTP transport
+- [ ] Health endpoint (`GET /health`) for orchestration
+- [ ] Hosted deployment guide (`docs/manuals/hosted-deployment.md`)
+- [ ] OpenAPI spec generated from tool registry for ChatGPT plugin compatibility
+- [ ] Codex MCP support documented
+
+---
+
+## v1.0.0 — Multi-target release
+
+**Theme**: Per ADR 15, this is the gated release. All ten v1.0 gates must be green.
+
+### v1.0 release gates
+
+1. [ ] Both transports supported (stdio + HTTP/SSE)
+2. [ ] All seven targets pass the v1.0 acceptance matrix (below)
+3. [ ] HTTP/SSE auth story documented and verified
+4. [ ] Tool surface normalized (v0.3.0 breaking changes complete)
+5. [ ] Error model implemented (ADR 14)
+6. [ ] Config precedence implemented (ADR 16)
+7. [ ] Published to PyPI and Official MCP Registry
+8. [ ] All ADR 9 security features verified; security regression corpus green
+9. [ ] Per-target installation guide, configuration reference, schema authoring guide, security model
+10. [ ] CHANGELOG spans 0.x → 1.0 with migration notes for every breaking change
+
+### Target compatibility matrix
+
+Each target must support the same feature set ("symmetric UX"). Cells marked `✓` are required for v1.0; `~` means partial / manual; `✗` means deferred to v1.x.
+
+| Feature | Neovim | Cursor | Windsurf | VS Code | Claude Desktop | ChatGPT | Codex |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Transport: stdio | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| Transport: HTTP/SSE | — | — | — | — | — | ✓ | ✓ |
+| All CONTRIBUTOR tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| All GENERATOR tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| All MANAGER tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Schema preset loading | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Onboarding flow (`get_initialisation_status` → `save_initial_schema`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Timewarrior tools (if installed) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Rate limiting | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Audit log written | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Dry-run / confirmation flow | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Sensitive field redaction | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Per-target install guide | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Headless e2e automation | ✓ | ✓ | ✓ | ✓ | ~ | ✓ | ✓ |
+| Per-target deprecation warnings surfaced to user | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+> `~` for Claude Desktop e2e because it cannot be driven headlessly today. The v1.0 gate accepts a manual checklist plus a recorded transcript as evidence.
+
+### Per-target acceptance test (ADR 12, layer 3)
+
+Each target's `tests/targets/<target>/` runs the same script and reports per-feature pass/fail. The acceptance suite — identical across targets — is:
+
+1. Server starts, advertises the expected role's tool set
+2. `get_initialisation_status` returns valid JSON
+3. `list_preset_schemas` returns at least the five bundled presets
+4. Onboarding round-trip: `analyse_existing_tasks_for_schema` → `generate_initial_schema_preview` → `save_initial_schema` (using a temp output path)
+5. `list_tasks` with empty and non-empty filters
+6. `get_task` for a known UUID
+7. `search_tasks` across `description`, `project`, `tags`, UDA
+8. `annotate_task` against a real task; verify via `get_task`
+9. `modify_task` of one built-in and one UDA field; verify
+10. `start_task` → `stop_task`; verify Timewarrior status if available
+11. `get_projects`, `get_tags`, `get_active_context`, `get_schema_info`
+12. GENERATOR-only: `create_task` minimal; `create_task` with full UDA payload
+13. MANAGER-only: `complete_task` with `dry_run=true` (expect `code: "dry_run"`)
+14. MANAGER-only: `delete_task` with `dry_run=true` (expect `code: "dry_run"`)
+15. MANAGER-only: `undo` after a real modification
+16. MANAGER-only: `sync` against a configured TaskChampion sync server (skipped if unconfigured)
+17. Rate limiter triggers at configured threshold; returns `code: "rate_limit"`
+18. Audit log entry written for every call above; entries parseable as JSON Lines with stable schema (ADR 13)
+19. Confirmation flow on a MANAGER lifecycle tool: first call → `code: "confirmation_required"`, second call → success
+20. Sensitive field in `config.redacted_fields` is absent from both tool return and audit log entry
+
+A target that fails any of items 1–20 blocks the v1.0 release for that target. Failure of items 1–18 across any target blocks the v1.0 release globally.
+
+---
+
+## v1.1.0 and beyond
+
+### Workflow features (post-v1.0)
+
 - [ ] `get_phase_distribution` — aggregate phase counts for a project/scope
 - [ ] `get_decisions_in_flight` — list unique `decides:` values with current phases
-- [ ] `promote_task` — phase transition with automatic field prompting (e.g., idea→research adds hypothesis)
-- [ ] `timew_start` / `timew_stop` — direct Timewarrior control independent of tasks
-- [ ] `timew_tag` / `timew_untag` — manage Timewarrior interval tags
-- [ ] `diff_after_sync` — compare task state before/after sync, report changes
+- [ ] `promote_task` — phase transition with field prompting (e.g. idea→research adds hypothesis)
+- [ ] `diff_after_sync` — compare task state before/after sync
+- [ ] `timew_start` / `timew_stop` / `timew_tag` / `timew_untag` — direct Timewarrior control
+- [ ] Burndown data via `task burndown`
+- [ ] Velocity metrics (completed-per-week, project-level)
 
-### Project-Scoped Configuration
-- [ ] `.taskchampion-mcp.toml` in project root for scoping visible tasks
-- [ ] Auto-detect project from working directory
-- [ ] Per-project role overrides
+### Per-project configuration
 
-### Task Templates
+- [ ] Per-project role overrides via `.taskchampion-mcp.toml`
+- [ ] Auto-detect project from working directory (already a precedence layer per ADR 16; this is the UX layer)
+- [ ] Project-scoped audit log paths
+
+### Task templates
+
 - [ ] Predefined task structures (bug report, feature request, research spike)
 - [ ] Template selection in `create_task`
 - [ ] User-defined templates in config
 
-### Reporting
-- [ ] Burndown data via `task burndown`
-- [ ] Time-spent summaries per project via Timewarrior
-- [ ] Task velocity metrics (completed per week)
+### Second-class targets
 
----
+- [ ] Taskwarrior 2.x support (CLI parsing differences, Taskserver/taskd sync)
+- [ ] Platform packages (AUR, Homebrew, .deb) per demand
+- [ ] Standalone binary via PyInstaller for Python-less environments
 
-## v0.3.0 — Platform Expansion
+### Observability extensions
 
-### HTTP/SSE Transport
-- [ ] Streamable HTTP transport for remote MCP clients
-- [ ] SSE transport for real-time updates
-- [ ] Authentication for HTTP transport (API key or token-based)
-
-### ChatGPT / Codex Integration
-- [ ] OpenAPI spec generation for ChatGPT plugin compatibility
-- [ ] Codex MCP support verification and documentation
-- [ ] Hosted deployment guide (self-hosted HTTP server)
-
-### Taskwarrior 2.x Support
-- [ ] Detect TW 2.x and adjust CLI parsing
-- [ ] Taskserver (taskd) sync compatibility
+- [ ] OpenTelemetry tracing (deferred from ADR 13)
+- [ ] Native log rotation if `logrotate` proves insufficient
+- [ ] Optional Prometheus metrics endpoint (HTTP transport only)
