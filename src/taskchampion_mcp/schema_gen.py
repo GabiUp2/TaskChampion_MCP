@@ -861,12 +861,16 @@ def _merge_conditions(
 
 
 def _sanitize_toml_key(name: str) -> str:
-    """Sanitize a field name for use as a TOML table key.
+    """Quote a field name for use as a TOML table key if needed.
 
     TOML table keys must be alphanumeric, underscores, or dashes only.
-    Invalid characters are replaced with underscore.
+    If the field name contains other characters, it is quoted to preserve
+    the original field name and avoid collisions.
     """
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+    if re.match(r"^[a-zA-Z0-9_-]+$", name):
+        return name
+    # Use quoted key to preserve special characters and avoid name collisions
+    return f'"{name}"'
 
 
 def _render_field(field_name: str, fdata: dict[str, Any]) -> list[str]:

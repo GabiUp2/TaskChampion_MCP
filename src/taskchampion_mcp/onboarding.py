@@ -39,7 +39,6 @@ Onboarding flow (user-facing summary):
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -139,11 +138,16 @@ def resolve_taxonomy_path(
     taxonomy_path: str | None = None,
     project_dir: str | None = None,
 ) -> Path | None:
-    """Resolve an explicit, configured, or auto-detected taxonomy path."""
+    """Resolve an explicit, configured, or auto-detected taxonomy path.
+
+    Returns None if the resolved path does not exist.
+    """
     if taxonomy_path:
-        return Path(taxonomy_path).expanduser().resolve()
+        path = Path(taxonomy_path).expanduser().resolve()
+        return path if path.exists() else None
     if config.taxonomy_path:
-        return Path(config.taxonomy_path).expanduser().resolve()
+        path = Path(config.taxonomy_path).expanduser().resolve()
+        return path if path.exists() else None
     detected = detect_taxonomy_files(project_dir)
     return Path(detected[0]) if detected else None
 
@@ -418,16 +422,6 @@ def _taxonomy_summary(taxonomy: TaxonomyInfo, taxonomy_path: Path) -> dict[str, 
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SchemaPreview:
-    """Internal struct used by the CLI wrapper to avoid re-parsing the dict."""
-
-    schema_toml: str
-    schema_name: str
-    task_count: int
-    resolved_taxonomy: Path | None
-
-
 def _build_preview_payload(
     *,
     schema_toml: str,
@@ -536,7 +530,12 @@ def save_initial_schema(
                 "error": True,
                 "message": f"Schema file already exists: {out}. Pass overwrite=true to replace it.",
             }
-        out.unlink()
+        # Handle race condition: file might be created between check and unlink
+        try:
+            out.unlink()
+        except FileNotFoundError:
+            # File was deleted by another process, proceed with save
+            pass
 
     saved_path = save_generated_schema(schema_toml, out)
 
@@ -778,11 +777,7 @@ def upsert_server_config(
             new_lines.append(line)
             continue
 
-        if (
-            in_server
-            and stripped.startswith("schema ")
-            or (in_server and stripped.startswith("schema="))
-        ):
+        if in_server and (stripped.startswith("schema ") or stripped.startswith("schema=")):
             if schema_name:
                 new_lines.append(f'schema = "{schema_name}"')
                 wrote_schema_name = True
@@ -830,4 +825,5 @@ __all__ = [
     "save_initial_schema",
     "upsert_server_config",
     "use_preset_schema",
+    "_default_schema_path",
 ]

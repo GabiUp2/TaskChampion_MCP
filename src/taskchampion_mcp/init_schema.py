@@ -26,8 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from taskchampion_mcp.cli import TaskwarriorCLI
-from taskchampion_mcp.config import default_config_path, load_config
+from taskchampion_mcp.config import load_config
 from taskchampion_mcp.onboarding import (
+    _default_schema_path,
     analyse_existing_tasks,
     default_schema_name_for_source,
     generate_schema_preview,
@@ -167,9 +168,7 @@ def _run_generate_branch(
     out_path: Path | None = Path(output_path).expanduser() if output_path else None
     overwrite = False
     if out_path is None:
-        # _default_schema_path is internal to onboarding; reproduce the
-        # standard location for confirmation messaging.
-        out_path = default_config_path().parent / "generated_schema.toml"
+        out_path = _default_schema_path()
 
     if out_path.exists():
         if non_interactive:

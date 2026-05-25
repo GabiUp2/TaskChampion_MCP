@@ -487,3 +487,50 @@ The package provides a `taskchampion-mcp-server` entry point that IDE MCP config
 - Requires Python to be installed (almost always true on Linux)
 - PyPI package naming must be claimed early
 - Platform-specific packages (AUR, Homebrew) offer better system integration but are deferred
+
+---
+
+# ADR 11: TOML Field Name Handling — Quoted Keys for Special Characters
+
+**Date:** 2026-05-25
+**Status:** Accepted
+**Author:** gabiup2
+
+## Context
+
+Taskwarrior UDA field names can contain spaces, dots, and other special characters (e.g., "client name", "field.with.dots"). When generating schema TOML files, these field names must be represented as TOML table keys. TOML has strict rules about bare keys (alphanumeric, underscores, dashes only), but supports quoted keys for arbitrary strings.
+
+A previous implementation replaced invalid characters with underscores, causing field name collisions:
+- `"field name"` → `"field_name"`
+- `"field-name"` → `"field_name"`
+
+This resulted in silent data loss when different field names collided after sanitization.
+
+## Decision
+
+Use **quoted TOML keys** for field names that contain special characters. The `_sanitize_toml_key()` function in `schema_gen.py` checks if a field name matches the bare key pattern `[a-zA-Z0-9_-]+`. If it does, the key is used as-is. If it contains other characters, the field name is wrapped in double quotes to preserve the original name and avoid collisions.
+
+Example:
+- `"scope"` → `[fields.scope]`
+- `"field name"` → `[fields."field name"]`
+- `"field.with.dots"` → `[fields."field.with.dots"]`
+
+The schema loader (`schema.py`) already handles quoted keys correctly via the standard TOML parser.
+
+## Alternatives Considered
+
+- **Replace invalid characters with underscores** — causes field name collisions, silent data loss
+- **Reject field names with special characters** — breaks existing Taskwarrior setups, user-hostile
+- **Use a different escaping mechanism (e.g., URL encoding)** — non-standard, harder to read
+
+## Consequences
+
+### Pros
+- Preserves original field names exactly
+- No risk of name collisions
+- TOML-standard approach
+- Backward compatible with existing schema loader
+
+### Cons
+- Quoted keys are slightly less readable in raw TOML files
+- Requires documentation for users editing schemas manually

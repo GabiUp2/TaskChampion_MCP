@@ -199,7 +199,7 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     def generate_initial_schema_preview(
         taxonomy_path: str = "",
         project_dir: str = "",
-        schema_name: str = "auto_generated",
+        schema_name: str = "",
     ) -> str:
         """Generate a reviewable schema TOML preview without writing files.
 
@@ -213,7 +213,7 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 task_cli=reg.task,
                 taxonomy_path=taxonomy_path or None,
                 project_dir=project_dir or None,
-                schema_name=schema_name or "auto_generated",
+                schema_name=schema_name or None,
             )
         )
 
