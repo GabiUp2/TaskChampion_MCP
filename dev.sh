@@ -9,11 +9,14 @@
 # Actions:
 #   setup       — Install Python deps (uv), create venv, install dev dependencies
 #   check       — Verify all required tools are installed and report versions
+#   install     — Add taskchampion MCP entry to IDE config (windsurf/cursor/vscode/claude)
+#   init        — First-run schema wizard: analyse tasks + taxonomy, generate schema
 #   test        — Run the test suite
 #   lint        — Run ruff linter
 #   format      — Run ruff formatter
 #   run         — Start the MCP server (stdio) for manual testing
 #   inspect     — Start the MCP inspector for interactive debugging
+#   publish     — Build and publish to PyPI + MCP Registry
 #   clean       — Remove build artifacts, caches, venv
 #   list        — List all project-related installed components
 #   help        — Show this help message
@@ -244,6 +247,220 @@ else:
 " "$cfg_path"
 }
 
+_upsert_mcp_entry() {
+    # Insert or update the 'taskchampion' key in mcpServers of a JSON config file.
+    # Creates the file (and parent dirs) if it doesn't exist.
+    local cfg_path="$1"
+    local cfg_name="$2"
+    local server_command="$3"
+    local server_args="$4"  # JSON array string, e.g. '["-m", "taskchampion_mcp.server"]'
+
+    mkdir -p "$(dirname "$cfg_path")"
+
+    python3 -c "
+import json, sys, os
+
+path, cmd, args_json = sys.argv[1], sys.argv[2], sys.argv[3]
+args = json.loads(args_json)
+
+if os.path.isfile(path):
+    with open(path) as f:
+        data = json.load(f)
+else:
+    data = {}
+
+data.setdefault('mcpServers', {})
+data['mcpServers']['taskchampion'] = {
+    'command': cmd,
+    'args': args,
+}
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" "$cfg_path" "$server_command" "$server_args"
+}
+
+action_install() {
+    _ensure_venv
+
+    local server_command="${VENV_DIR}/bin/python"
+    local server_args='["-m", "taskchampion_mcp.server"]'
+
+    # All known IDE MCP config locations
+    local -A ide_configs=(
+        [windsurf]="$HOME/.codeium/windsurf/mcp_config.json"
+        [cursor]="$HOME/.cursor/mcp.json"
+        [vscode]="$HOME/.vscode/mcp.json"
+        [claude]="${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+    )
+    local -A ide_labels=(
+        [windsurf]="Windsurf"
+        [cursor]="Cursor"
+        [vscode]="VS Code"
+        [claude]="Claude Desktop"
+    )
+
+    local target="${1:-}"
+
+    if [ -n "$target" ]; then
+        target="$(echo "$target" | tr '[:upper:]' '[:lower:]')"
+        if [ -z "${ide_configs[$target]+x}" ]; then
+            fail "Unknown IDE: $target"
+            echo "  Available: ${!ide_configs[*]}"
+            exit 1
+        fi
+        local cfg_path="${ide_configs[$target]}"
+        local cfg_name="${ide_labels[$target]}"
+        info "Installing taskchampion MCP entry into ${cfg_name} config..."
+        _upsert_mcp_entry "$cfg_path" "$cfg_name" "$server_command" "$server_args"
+        ok "${cfg_name}: taskchampion entry written to ${cfg_path}"
+        echo ""
+        info "Entry added:"
+        echo "  command: ${server_command}"
+        echo "  args:    -m taskchampion_mcp.server"
+        return
+    fi
+
+    # Interactive: show detected IDEs and let user pick
+    echo "Available IDE targets:"
+    echo ""
+    local idx=1
+    local -a keys=()
+    for key in windsurf cursor vscode claude; do
+        local cfg_path="${ide_configs[$key]}"
+        local cfg_name="${ide_labels[$key]}"
+        local status=""
+        if [ -f "$cfg_path" ]; then
+            if grep -qi "taskchampion" "$cfg_path" 2>/dev/null; then
+                status=" ${GREEN}(already configured)${NC}"
+            else
+                status=" ${YELLOW}(config exists, no entry)${NC}"
+            fi
+        else
+            local cfg_dir
+            cfg_dir="$(dirname "$cfg_path")"
+            if [ -d "$cfg_dir" ]; then
+                status=" ${CYAN}(dir exists, will create config)${NC}"
+            else
+                status=""
+            fi
+        fi
+        echo -e "  ${idx}) ${cfg_name}${status}"
+        keys+=("$key")
+        idx=$((idx + 1))
+    done
+    echo -e "  a) All of the above"
+    echo ""
+    read -rp "Select target(s) [1-4, a, or comma-separated]: " selection
+
+    local selected=()
+    if [[ "$selection" == "a" || "$selection" == "A" ]]; then
+        selected=("${keys[@]}")
+    else
+        IFS=',' read -ra parts <<< "$selection"
+        for part in "${parts[@]}"; do
+            part="$(echo "$part" | tr -d ' ')"
+            if [[ "$part" =~ ^[1-4]$ ]]; then
+                selected+=("${keys[$((part - 1))]}")
+            else
+                warn "Skipping invalid selection: $part"
+            fi
+        done
+    fi
+
+    if [ ${#selected[@]} -eq 0 ]; then
+        warn "No targets selected."
+        return
+    fi
+
+    echo ""
+    for key in "${selected[@]}"; do
+        local cfg_path="${ide_configs[$key]}"
+        local cfg_name="${ide_labels[$key]}"
+        info "Installing into ${cfg_name}..."
+        _upsert_mcp_entry "$cfg_path" "$cfg_name" "$server_command" "$server_args"
+        ok "${cfg_name}: ${cfg_path}"
+    done
+
+    echo ""
+    info "MCP server entry:"
+    echo "  command: ${server_command}"
+    echo "  args:    -m taskchampion_mcp.server"
+    ok "Install complete. Restart your IDE to pick up the new MCP server."
+}
+
+action_publish() {
+    _ensure_venv
+    _ensure_uv
+
+    info "Publishing TaskChampion MCP..."
+    echo ""
+
+    # 1. Run tests first
+    info "Step 1/4: Running tests..."
+    "$VENV_DIR/bin/python" -m pytest tests/ -v --tb=short || {
+        fail "Tests failed. Fix them before publishing."
+        exit 1
+    }
+    ok "Tests passed."
+    echo ""
+
+    # 2. Build package
+    info "Step 2/4: Building package..."
+    rm -rf "$PROJECT_DIR/dist"
+    uv build
+    ok "Package built."
+    echo ""
+
+    # 3. Publish to PyPI
+    info "Step 3/4: Publishing to PyPI..."
+    echo "  This requires a PyPI API token or Trusted Publishing."
+    read -rp "  Publish to PyPI now? [y/N]: " pypi_answer
+    if [[ "$pypi_answer" == "y" || "$pypi_answer" == "Y" ]]; then
+        if command -v twine &>/dev/null; then
+            twine upload dist/*
+        else
+            uv run --with twine twine upload dist/*
+        fi
+        ok "Published to PyPI."
+    else
+        warn "Skipped PyPI. Upload manually: twine upload dist/*"
+    fi
+    echo ""
+
+    # 4. Publish to MCP Registry
+    info "Step 4/4: Publishing to MCP Registry..."
+    if command -v mcp-publisher &>/dev/null; then
+        read -rp "  Publish to MCP Registry now? [y/N]: " mcp_answer
+        if [[ "$mcp_answer" == "y" || "$mcp_answer" == "Y" ]]; then
+            mcp-publisher publish
+            ok "Published to MCP Registry."
+        else
+            warn "Skipped MCP Registry. Run manually: mcp-publisher publish"
+        fi
+    else
+        warn "mcp-publisher not found. Install it:"
+        echo "  brew install mcp-publisher"
+        echo "  # or: curl -L https://github.com/modelcontextprotocol/registry/releases/..."
+    fi
+
+    echo ""
+    ok "Publish workflow complete."
+    info "Don't forget to:"
+    echo "  1. Tag the release: git tag v$("$VENV_DIR/bin/python" -c 'from taskchampion_mcp import __version__; print(__version__)')"
+    echo "  2. Push tags: git push --tags"
+    echo "  3. Create a GitHub Release with changelog"
+}
+
+action_init() {
+    _ensure_venv
+    info "Running first-run schema initialisation wizard..."
+    "$VENV_DIR/bin/python" -m taskchampion_mcp.init_schema \
+        --project-dir "$PROJECT_DIR" \
+        "$@"
+}
+
 action_clean() {
     info "Cleaning build artifacts and caches..."
     rm -rf "$VENV_DIR"
@@ -323,11 +540,14 @@ action_help() {
     echo "Actions:"
     echo "  setup     Install Python deps, create venv, install dev dependencies"
     echo "  check     Verify all required tools and report versions"
+    echo "  install   Add taskchampion MCP entry to IDE config [windsurf|cursor|vscode|claude]"
+    echo "  init      First-run schema wizard (analyse tasks + taxonomy, generate schema)"
     echo "  test      Run the test suite (pass extra pytest args after)"
     echo "  lint      Run ruff linter on src/ and tests/"
     echo "  format    Run ruff formatter on src/ and tests/"
     echo "  run       Start the MCP server in stdio mode"
     echo "  inspect   Start the MCP Inspector for interactive debugging"
+    echo "  publish   Build and publish to PyPI + MCP Registry"
     echo "  clean     Remove build artifacts, caches, and virtual environment"
     echo "  list      Show all project-related installed components"
     echo "  help      Show this help message"
@@ -340,11 +560,14 @@ action_help() {
 case "${1:-help}" in
     setup)   action_setup ;;
     check)   action_check ;;
+    install) shift; action_install "$@" ;;
+    init)    shift; action_init "$@" ;;
     test)    shift; action_test "$@" ;;
     lint)    action_lint ;;
     format)  action_format ;;
     run)     action_run ;;
     inspect) action_inspect ;;
+    publish) action_publish ;;
     clean)   action_clean ;;
     list)    action_list ;;
     help)    action_help ;;

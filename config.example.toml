@@ -13,6 +13,11 @@ role = "CONTRIBUTOR"
 schema = "minimal"
 # schema_path = "/path/to/custom_schema.toml"
 
+# Path to a taxonomy markdown file describing field semantics, lifecycle
+# phases, and conditional requirements. Used by schema auto-generation
+# (IDEA-003) to enrich the generated schema with descriptions and rules.
+# taxonomy_path = "/path/to/TAXONOMY.md"
+
 # Path to the Taskwarrior binary (default: "task")
 # task_binary = "task"
 

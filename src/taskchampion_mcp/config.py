@@ -22,6 +22,7 @@ else:
 # Roles
 # ---------------------------------------------------------------------------
 
+
 class Role:
     CONTRIBUTOR = "CONTRIBUTOR"
     GENERATOR = "GENERATOR"
@@ -49,6 +50,7 @@ class Role:
 # Configuration data class
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ServerConfig:
     role: str = Role.CONTRIBUTOR
@@ -63,12 +65,14 @@ class ServerConfig:
     dry_run_default: bool = False
     audit_log_path: str = ""
     redacted_fields: list[str] = field(default_factory=list)
+    taxonomy_path: str | None = None
     taskwarrior_override_rc: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Config file locations
 # ---------------------------------------------------------------------------
+
 
 def _xdg_config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -94,6 +98,7 @@ def default_schema_dir() -> Path:
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     for key in keys:
@@ -121,6 +126,7 @@ def load_config(path: Path | None = None) -> ServerConfig:
         cfg.schema_path = server.get("schema_path", cfg.schema_path)
         cfg.task_binary = server.get("task_binary", cfg.task_binary)
         cfg.timew_binary = server.get("timew_binary", cfg.timew_binary)
+        cfg.taxonomy_path = server.get("taxonomy_path", cfg.taxonomy_path)
         cfg.taskwarrior_override_rc = server.get("taskrc", cfg.taskwarrior_override_rc)
 
         security = data.get("security", {})

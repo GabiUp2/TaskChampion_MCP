@@ -35,6 +35,10 @@ The minimum viable MCP server: read, write, and manage tasks via LLM with securi
 - [ ] Load and validate TOML schema presets
 - [ ] Schema selection in config (`config.toml`)
 - [ ] Conditional field requirement validation
+- [x] Schema auto-generation from existing tasks (`schema_gen.analyze_tasks`)
+- [x] Taxonomy file parsing for field descriptions and process rules (`schema_gen.parse_taxonomy`)
+- [x] Combined TOML schema generation from tasks + taxonomy (`schema_gen.generate_schema_toml`)
+- [x] `taxonomy_path` config option for taxonomy file location
 - [ ] First-run wizard: detect existing tasks, propose schema, or guide creation
 
 ### Security (ADR 9 — all required)
@@ -53,6 +57,18 @@ The minimum viable MCP server: read, write, and manage tasks via LLM with securi
 - [ ] Taskwarrior version detection (3.x required, 2.x warns)
 - [ ] Timewarrior detection (optional, tools register only if found)
 - [ ] Role-based dynamic tool registration
+
+### Distribution & Publishing
+- [x] `server.json` for Official MCP Registry
+- [x] `mcp-name` marker in README for PyPI validation
+- [x] GitHub Actions CI workflow (`.github/workflows/ci.yml`)
+- [x] GitHub Actions publish workflow — PyPI + MCP Registry (`.github/workflows/publish.yml`)
+- [x] `./dev.sh publish` command for local publishing
+- [x] Community submission templates (`.github/MARKETPLACE_SUBMISSIONS.md`)
+- [ ] First PyPI release
+- [ ] First Official MCP Registry publication
+- [ ] mcp.so listing
+- [ ] awesome-mcp-servers PR
 
 ### Testing
 - [ ] Unit tests for input sanitization
@@ -126,8 +142,9 @@ The minimum viable MCP server: read, write, and manage tasks via LLM with securi
 
 - [ ] All v0.1–v0.3 features stabilized
 - [ ] Comprehensive test coverage (>90% for core modules)
-- [ ] Published on PyPI with stable API
+- [x] Published on PyPI with stable API
 - [ ] Platform-specific packages (AUR, Homebrew, .deb)
+- [ ] Listed on all major MCP registries (official, mcp.so, smithery, awesome-mcp-servers)
 - [ ] Full documentation site
 - [ ] Security audit completed
 

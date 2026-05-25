@@ -4,11 +4,12 @@
 
 > *For the bearded Unix jockeys and keyboard cowboys who manage their life from the terminal — and now want their LLM to lend a hand.* 🧔⌨️
 
-<!-- Badges (uncomment when published)
+<!-- mcp-name: io.github.GabiUp2/taskchampion-mcp -->
+
 [![PyPI](https://img.shields.io/pypi/v/taskchampion-mcp)](https://pypi.org/project/taskchampion-mcp/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
--->
+[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io)
 
 ---
 

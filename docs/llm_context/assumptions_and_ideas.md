@@ -84,11 +84,11 @@
 - **Description:** After `task sync`, compare before/after exports to report what changed from other replicas. Useful for multi-machine setups.
 - **Status:** Captured for v0.2.0+ consideration
 
-### IDEA-003: Schema auto-generation from existing tasks
-- **Date:** 2026-05-25
-- **Author:** Human (gabiup2) — stated in initial requirements
-- **Description:** On first run, if no schema is configured, the MCP can analyze existing tasks (`task export`) to infer which UDAs are in use, their value distributions, and generate a draft schema TOML. User reviews and approves.
-- **Status:** Required for v0.1.0 (first-run wizard)
+### IDEA-003: Schema auto-generation from existing tasks + taxonomy file
+- **Date:** 2026-05-25 (extended 2026-05-25)
+- **Author:** Human (gabiup2) — stated in initial requirements; extended by human request
+- **Description:** On first run, if no schema is configured, the MCP can analyze existing tasks (`task export`) to infer which UDAs are in use, their value distributions, and generate a draft schema TOML. Extended to also accept a taxonomy markdown file (like `user/TAXONOMY.md`) that describes field semantics, lifecycle processes, conditional requirements, and phase transitions. The taxonomy enriches the generated schema with descriptions and rules beyond what raw task data can infer. User reviews and approves.
+- **Status:** Implemented — `src/taskchampion_mcp/schema_gen.py` with 41 tests. Config support via `taxonomy_path` in `config.toml`.
 
 ### IDEA-004: Project-scoped MCP configs
 - **Date:** 2026-05-25
@@ -123,6 +123,13 @@
 - **Status:** Unverified — defense-in-depth decision
 - **Source:** Since subprocess argument lists prevent shell injection, URL-encoded metacharacters like `%26` are not directly dangerous. However, blocking them prevents potential double-decode attacks if any downstream component URL-decodes values.
 - **Impact:** False positive rejections of legitimate values containing `%26` etc. Unlikely in task descriptions.
+
+### ASM-014: Taxonomy markdown files follow a parseable heading structure
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — based on the project author's `user/TAXONOMY.md` format
+- **Source:** The parser expects `### N.N field_name — values` headings, markdown tables for enum values, and "Required when" phrases for conditions. Other taxonomy formats may not parse correctly.
+- **Impact:** Users with differently structured taxonomy files would get incomplete schema enrichment. Mitigated: analysis-only mode still works; taxonomy is optional.
 
 ### ASM-013: MCP tool return values should be JSON strings
 - **Date:** 2026-05-25

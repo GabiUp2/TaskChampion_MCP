@@ -1,0 +1,97 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.GabiUp2/taskchampion-mcp",
+  "description": "MCP server for Taskwarrior 3.x, TaskChampion, and Timewarrior — read, create, modify, and manage tasks from any LLM assistant.",
+  "version": "0.2.0",
+  "repository": {
+    "url": "https://github.com/GabiUp2/TaskChampion_MCP",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registry_type": "pypi",
+      "identifier": "taskchampion-mcp",
+      "version": "0.2.0",
+      "runtime": "python",
+      "runtime_arguments": [
+        "-m",
+        "taskchampion_mcp.server"
+      ],
+      "environment_variables": [],
+      "supported_platforms": [
+        "linux",
+        "macos"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "list_tasks",
+      "description": "List tasks matching optional Taskwarrior filter expressions"
+    },
+    {
+      "name": "get_task",
+      "description": "Get full details for a single task by UUID"
+    },
+    {
+      "name": "search_tasks",
+      "description": "Search tasks by keyword or regex pattern"
+    },
+    {
+      "name": "get_projects",
+      "description": "List all project names in the task database"
+    },
+    {
+      "name": "get_tags",
+      "description": "List all tags in the task database"
+    },
+    {
+      "name": "get_schema_info",
+      "description": "Return the loaded schema definition for LLM context"
+    },
+    {
+      "name": "annotate_task",
+      "description": "Add an annotation to a task by UUID"
+    },
+    {
+      "name": "modify_task",
+      "description": "Modify fields on an existing task by UUID"
+    },
+    {
+      "name": "create_task",
+      "description": "Create a new task with schema validation"
+    },
+    {
+      "name": "complete_task",
+      "description": "Mark a task as done by UUID"
+    },
+    {
+      "name": "delete_task",
+      "description": "Delete a task by UUID"
+    },
+    {
+      "name": "undo",
+      "description": "Undo the last Taskwarrior operation"
+    },
+    {
+      "name": "sync",
+      "description": "Trigger task sync via TaskChampion"
+    },
+    {
+      "name": "timew_status",
+      "description": "Check if Timewarrior is currently tracking time"
+    },
+    {
+      "name": "timew_summary",
+      "description": "Get Timewarrior time tracking summary"
+    },
+    {
+      "name": "timew_start",
+      "description": "Start tracking time with optional tags"
+    },
+    {
+      "name": "timew_stop",
+      "description": "Stop current Timewarrior tracking"
+    }
+  ]
+}
