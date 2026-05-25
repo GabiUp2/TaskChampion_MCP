@@ -20,11 +20,20 @@ from mcp.server.fastmcp import FastMCP
 from taskchampion_mcp.audit import AuditLogger
 from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
 from taskchampion_mcp.config import Role, ServerConfig, load_config
+from taskchampion_mcp.onboarding import (
+    analyse_existing_tasks as onboarding_analyse_existing_tasks,
+    analyse_taxonomy_file as onboarding_analyse_taxonomy_file,
+    generate_schema_preview as onboarding_generate_schema_preview,
+    get_initialisation_status as onboarding_get_initialisation_status,
+    propose_initialisation_options as onboarding_propose_initialisation_options,
+    save_initial_schema as onboarding_save_initial_schema,
+)
 from taskchampion_mcp.rate_limiter import RateLimiter
 from taskchampion_mcp.schema import TaskSchema, load_schema
 from taskchampion_mcp.tools import ToolRegistry
 
 logger = logging.getLogger("taskchampion_mcp")
+
 
 # ---------------------------------------------------------------------------
 # Server factory
@@ -134,6 +143,101 @@ def create_server(
 
 def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     """Register CONTRIBUTOR-level tools (read + annotate + modify)."""
+
+    @mcp.tool()
+    def get_initialisation_status(project_dir: str = "") -> str:
+        """Inspect first-run onboarding state without mutating tasks or config.
+
+        Use this before task creation/modification if the active schema may be
+        the bundled minimal default rather than a user-specific taxonomy.
+        """
+        return json.dumps(
+            onboarding_get_initialisation_status(
+                config=reg.config,
+                task_cli=reg.task,
+                timew_cli=reg.timew,
+                project_dir=project_dir or None,
+            )
+        )
+
+    @mcp.tool()
+    def propose_initialisation_options(project_dir: str = "") -> str:
+        """Return onboarding choices for the user/model to discuss.
+
+        Options include using a taxonomy file, inferring from existing tasks,
+        combining both, or selecting a bundled preset.
+        """
+        status = onboarding_get_initialisation_status(
+            config=reg.config,
+            task_cli=reg.task,
+            timew_cli=reg.timew,
+            project_dir=project_dir or None,
+        )
+        return json.dumps(onboarding_propose_initialisation_options(status))
+
+    @mcp.tool()
+    def analyse_existing_tasks_for_schema() -> str:
+        """Analyse existing Taskwarrior tasks for field/schema inference.
+
+        This is read-only. It returns field occurrence ratios, likely enum
+        values, likely required fields, projects, tags, and detected UDAs.
+        """
+        return json.dumps(onboarding_analyse_existing_tasks(reg.task))
+
+    @mcp.tool()
+    def analyse_taxonomy_file(path: str) -> str:
+        """Parse a taxonomy Markdown file and return extracted semantics.
+
+        This is read-only. It extracts fields, descriptions, allowed values,
+        conditional requirements, and phase transitions when possible.
+        """
+        return json.dumps(onboarding_analyse_taxonomy_file(path))
+
+    @mcp.tool()
+    def generate_initial_schema_preview(
+        taxonomy_path: str = "",
+        project_dir: str = "",
+        schema_name: str = "auto_generated",
+    ) -> str:
+        """Generate a reviewable schema TOML preview without writing files.
+
+        The preview combines existing task analysis and, when available, a
+        taxonomy Markdown file. The returned schema_toml should be reviewed by
+        the user before calling save_initial_schema.
+        """
+        return json.dumps(
+            onboarding_generate_schema_preview(
+                config=reg.config,
+                task_cli=reg.task,
+                taxonomy_path=taxonomy_path or None,
+                project_dir=project_dir or None,
+                schema_name=schema_name or "auto_generated",
+            )
+        )
+
+    @mcp.tool()
+    def save_initial_schema(
+        schema_toml: str,
+        taxonomy_path: str = "",
+        output_path: str = "",
+        overwrite: bool = False,
+        update_config: bool = True,
+    ) -> str:
+        """Persist an approved generated schema and optionally update config.toml.
+
+        This writes schema/config files but does not mutate Taskwarrior tasks.
+        Call generate_initial_schema_preview first and show the user a summary
+        before saving.
+        """
+        return json.dumps(
+            onboarding_save_initial_schema(
+                schema_toml=schema_toml,
+                taxonomy_path=taxonomy_path or None,
+                output_path=output_path or None,
+                overwrite=overwrite,
+                update_config=update_config,
+            )
+        )
 
     @mcp.tool()
     def list_tasks(
@@ -379,6 +483,11 @@ def _build_instructions(
         )
 
     lines += [
+        "",
+        "FIRST-RUN / TAXONOMY RULES:",
+        "- If task semantics are unclear, call get_initialisation_status first.",
+        "- If no custom schema or taxonomy is configured, ask the user for a taxonomy file or offer schema inference from existing tasks.",
+        "- Generate schema previews before saving; do not silently invent workflow semantics.",
         "",
         "IMPORTANT RULES:",
         "- Always use task UUIDs, never local IDs.",
