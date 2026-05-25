@@ -291,7 +291,12 @@ def run_init(
         return False
 
     # 4. Generate schema
-    name = schema_name or "auto_generated"
+    if schema_name:
+        name = schema_name
+    elif resolved_taxonomy:
+        name = "auto_generated_from_taxonomy"
+    else:
+        name = "auto_generated_from_tasks"
     _info("Generating schema...")
     toml_content = generate_schema_from_tasks_and_taxonomy(
         tasks=tasks,

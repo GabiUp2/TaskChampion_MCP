@@ -137,3 +137,12 @@
 - **Status:** Unverified — based on MCP SDK examples
 - **Source:** MCP SDK tool functions return strings. We serialize tool results as JSON strings for structured data.
 - **Impact:** If the SDK expects different return types, tools would fail. Low risk given SDK documentation examples.
+
+### IDEA-005: Differentiate schema names by generation source
+- **Date:** 2026-05-25
+- **Author:** gabiup2
+- **Description:** The schema name should reflect whether it was generated from a provided taxonomy file vs. from analyzing existing tasks alone. Current implementation uses a single "auto_generated" name. Should differentiate:
+  - `auto_generated_from_taxonomy` — when taxonomy file is provided
+  - `auto_generated_from_tasks` — when only tasks are analyzed
+  This helps users understand the source and quality of the generated schema.
+- **Status:** Captured for v0.1.0 implementation

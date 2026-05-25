@@ -860,10 +860,20 @@ def _merge_conditions(
     return conditions
 
 
+def _sanitize_toml_key(name: str) -> str:
+    """Sanitize a field name for use as a TOML table key.
+
+    TOML table keys must be alphanumeric, underscores, or dashes only.
+    Invalid characters are replaced with underscore.
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+
+
 def _render_field(field_name: str, fdata: dict[str, Any]) -> list[str]:
     """Render a single field definition as TOML lines."""
     lines = []
-    lines.append(f"[fields.{field_name}]")
+    safe_name = _sanitize_toml_key(field_name)
+    lines.append(f"[fields.{safe_name}]")
     lines.append(f'type = "{fdata.get("type", "string")}"')
     lines.append(f"required = {str(fdata.get('required', False)).lower()}")
     if fdata.get("values"):
