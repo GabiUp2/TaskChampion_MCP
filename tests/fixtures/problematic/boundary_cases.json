@@ -1,0 +1,196 @@
+[
+  {
+    "_comment": "Empty string for all optional fields",
+    "description": "Task with all empty optionals",
+    "project": "",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "priority": "",
+    "tags": [],
+    "hypothesis": "",
+    "versus": "",
+    "decides": "",
+    "effort": "",
+    "confidence": ""
+  },
+  {
+    "_comment": "Extremely long description (2000+ chars)",
+    "description": "This is an extremely long task description that goes on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Unicode characters in description and tags",
+    "description": "Naprawić błąd w systemie uwierzytelniania 认证系统 バグを修正",
+    "project": "test.unicode",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "tags": [
+      "日本語",
+      "中文",
+      "العربية",
+      "emoji🚀"
+    ]
+  },
+  {
+    "_comment": "Emoji in description",
+    "description": "🔥 Fix critical production bug 🐛 ASAP ⚡",
+    "project": "test",
+    "scope": "work",
+    "client": "acme",
+    "area": "ops",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Newlines and tabs in description",
+    "description": "Task with\nnewlines\tand\ttabs\ninside the description field",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Project name at maximum depth (4 levels)",
+    "description": "Deep project nesting",
+    "project": "personal.infra.myserver.backup",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Project name exceeding maximum depth (5 levels — should warn)",
+    "description": "Too deep project nesting",
+    "project": "personal.infra.myserver.backup.restic",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "impl"
+  },
+  {
+    "_comment": "50 tags on a single task",
+    "description": "Task with excessive number of tags",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "tags": [
+      "tag01",
+      "tag02",
+      "tag03",
+      "tag04",
+      "tag05",
+      "tag06",
+      "tag07",
+      "tag08",
+      "tag09",
+      "tag10",
+      "tag11",
+      "tag12",
+      "tag13",
+      "tag14",
+      "tag15",
+      "tag16",
+      "tag17",
+      "tag18",
+      "tag19",
+      "tag20",
+      "tag21",
+      "tag22",
+      "tag23",
+      "tag24",
+      "tag25",
+      "tag26",
+      "tag27",
+      "tag28",
+      "tag29",
+      "tag30",
+      "tag31",
+      "tag32",
+      "tag33",
+      "tag34",
+      "tag35",
+      "tag36",
+      "tag37",
+      "tag38",
+      "tag39",
+      "tag40",
+      "tag41",
+      "tag42",
+      "tag43",
+      "tag44",
+      "tag45",
+      "tag46",
+      "tag47",
+      "tag48",
+      "tag49",
+      "tag50"
+    ]
+  },
+  {
+    "_comment": "Description with only whitespace",
+    "description": "   \t  \n  ",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Single character description",
+    "description": "x",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Annotation with very long text (1000+ chars)",
+    "description": "Task with long annotation",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "annotations": [
+      {
+        "description": "This is a very long annotation that contains a lot of detail about the task including step by step instructions for how to reproduce the issue and what the expected behavior should be and what the actual behavior is and links to relevant documentation and screenshots and logs and stack traces and configuration files and environment variables and system information and version numbers and dependency lists and test cases and edge cases and workarounds and potential solutions and their trade-offs and risks and timelines and dependencies and stakeholders and impact analysis and rollback plans and monitoring requirements and success criteria and acceptance tests and deployment steps and post-deployment verification steps and communication plans and escalation paths and related tickets and historical context and lessons learned from similar issues in the past"
+      }
+    ]
+  },
+  {
+    "_comment": "HTML/Markdown injection in description",
+    "description": "Fix <script>alert('xss')</script> vulnerability in **bold** task [link](http://evil.com)",
+    "project": "test",
+    "scope": "personal",
+    "area": "security",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Backslashes and escape sequences",
+    "description": "Fix path C:\\Users\\admin\\Documents\\file.txt",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Task with due date in the past",
+    "description": "Overdue task from last year",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "due": "20250101T000000Z"
+  },
+  {
+    "_comment": "Circular dependency (self-referencing UUID)",
+    "description": "Task that depends on itself",
+    "uuid": "f6000001-0000-0000-0000-000000000099",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "depends": "f6000001-0000-0000-0000-000000000099"
+  }
+]

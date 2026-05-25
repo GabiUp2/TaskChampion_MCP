@@ -1,0 +1,137 @@
+[
+  {
+    "_comment": "Missing required description field",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Empty description string",
+    "description": "",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Invalid scope value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "invalid_scope",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Invalid phase value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "nonexistent_phase"
+  },
+  {
+    "_comment": "Invalid area value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "quantum_computing",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Invalid priority value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "priority": "CRITICAL"
+  },
+  {
+    "_comment": "Invalid effort value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "effort": "XXL"
+  },
+  {
+    "_comment": "Invalid confidence value (numeric instead of string)",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "confidence": 5
+  },
+  {
+    "_comment": "Research phase missing required hypothesis",
+    "description": "Research something",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "research"
+  },
+  {
+    "_comment": "Testing phase missing required hypothesis and versus",
+    "description": "Test something",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "testing"
+  },
+  {
+    "_comment": "Work scope missing required client",
+    "description": "Do work task",
+    "project": "work.acme",
+    "scope": "work",
+    "area": "ops",
+    "phase": "impl"
+  },
+  {
+    "_comment": "LLM provenance partially filled (missing gen_model)",
+    "description": "LLM task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "gen_harness": "mcp",
+    "gen_persona": "default"
+  },
+  {
+    "_comment": "Unknown UDA field that doesn't exist in any schema",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "nonexistent_field": "some value"
+  },
+  {
+    "_comment": "Due date in wrong format (not ISO or taskwarrior relative)",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "due": "next Tuesday maybe"
+  },
+  {
+    "_comment": "Tags as string instead of list",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "tags": "python,rust,linux"
+  },
+  {
+    "_comment": "Numeric description instead of string",
+    "description": 12345,
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  }
+]

@@ -1,0 +1,130 @@
+[
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000001",
+    "id": 1,
+    "description": "Update README with installation instructions",
+    "status": "pending",
+    "project": "docs",
+    "priority": "M",
+    "tags": ["documentation"],
+    "entry": "20260501T080000Z",
+    "modified": "20260501T080000Z",
+    "urgency": 4.2
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000002",
+    "id": 2,
+    "description": "Fix login page CSS alignment",
+    "status": "pending",
+    "project": "webapp.frontend",
+    "priority": "H",
+    "tags": ["css", "bug"],
+    "entry": "20260502T090000Z",
+    "modified": "20260502T090000Z",
+    "due": "20260510T000000Z",
+    "urgency": 12.5
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000003",
+    "id": 3,
+    "description": "Set up CI pipeline for test automation",
+    "status": "pending",
+    "project": "infra.ci",
+    "priority": "M",
+    "tags": ["devops", "automation"],
+    "entry": "20260503T100000Z",
+    "modified": "20260503T100000Z",
+    "urgency": 6.1
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000004",
+    "id": 4,
+    "description": "Write unit tests for auth module",
+    "status": "pending",
+    "project": "webapp.backend.auth",
+    "priority": "H",
+    "tags": ["testing", "python"],
+    "entry": "20260503T110000Z",
+    "modified": "20260504T080000Z",
+    "depends": "a1000001-0000-0000-0000-000000000002",
+    "urgency": 9.8
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000005",
+    "id": 5,
+    "description": "Research database migration strategies",
+    "status": "pending",
+    "project": "webapp.backend",
+    "priority": "L",
+    "tags": ["database", "research"],
+    "entry": "20260504T140000Z",
+    "modified": "20260504T140000Z",
+    "urgency": 2.3
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000006",
+    "id": 6,
+    "description": "Add rate limiting to API endpoints",
+    "status": "pending",
+    "project": "webapp.backend.api",
+    "priority": "M",
+    "tags": ["security", "python"],
+    "entry": "20260505T080000Z",
+    "modified": "20260505T080000Z",
+    "urgency": 5.5
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000007",
+    "id": 7,
+    "description": "Review and merge pending PRs",
+    "status": "pending",
+    "project": "webapp",
+    "tags": ["review"],
+    "entry": "20260506T090000Z",
+    "modified": "20260506T090000Z",
+    "urgency": 3.0
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000008",
+    "id": 8,
+    "description": "Deploy staging environment",
+    "status": "pending",
+    "project": "infra.staging",
+    "priority": "H",
+    "tags": ["devops", "docker"],
+    "entry": "20260506T100000Z",
+    "modified": "20260506T100000Z",
+    "due": "20260515T000000Z",
+    "urgency": 11.2
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000009",
+    "id": 9,
+    "description": "Create user onboarding flow mockups",
+    "status": "pending",
+    "project": "webapp.frontend.onboarding",
+    "priority": "M",
+    "tags": ["design", "ux"],
+    "entry": "20260507T110000Z",
+    "modified": "20260507T110000Z",
+    "annotations": [
+      {
+        "entry": "20260507T120000Z",
+        "description": "Reference: https://example.com/ux-patterns"
+      }
+    ],
+    "urgency": 5.0
+  },
+  {
+    "uuid": "a1000001-0000-0000-0000-000000000010",
+    "id": 10,
+    "description": "Optimize database query performance for reports",
+    "status": "pending",
+    "project": "webapp.backend.reporting",
+    "priority": "L",
+    "tags": ["performance", "database"],
+    "entry": "20260508T080000Z",
+    "modified": "20260508T080000Z",
+    "urgency": 2.1
+  }
+]

@@ -1,0 +1,145 @@
+# TaskChampion MCP — Getting Things Done (GTD) Schema
+# Based on David Allen's GTD methodology: capture, clarify, organize, reflect, engage.
+# Adds UDAs for context, energy level, and GTD-specific categorization.
+#
+# Schema version: 1.0.0
+
+[meta]
+name = "gtd"
+version = "1.0.0"
+description = "Getting Things Done workflow with contexts, energy levels, and GTD categories"
+taskwarrior_version = "3.x"
+
+# --- Built-in Fields ---
+
+[fields.description]
+type = "string"
+required = true
+description = "Next physical action to take. Must start with a verb (e.g., 'Call dentist to schedule appointment')."
+
+[fields.project]
+type = "string"
+required = false
+description = "GTD project — any outcome requiring more than one action step. Dot-notation hierarchy."
+
+[fields.priority]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+description = "Priority for relative ordering within a context."
+
+[fields.tags]
+type = "list"
+required = false
+description = "Freeform tags for technology, topic, or person associations."
+
+[fields.due]
+type = "date"
+required = false
+description = "Hard deadline. Use only for real deadlines, not aspirational dates."
+
+[fields.wait]
+type = "date"
+required = false
+description = "Date when this task becomes visible. Use for 'tickler file' / future actions."
+
+[fields.depends]
+type = "string"
+required = false
+description = "UUIDs of prerequisite tasks."
+
+[fields.annotations]
+type = "list"
+required = false
+description = "Reference material, links, notes."
+
+# --- GTD-Specific UDAs ---
+
+[fields.gtd_context]
+type = "string"
+required = true
+values = ["desk", "computer", "phone", "errands", "home", "office", "anywhere", "agenda"]
+uda = true
+description = "Where/how this action can be performed. Core GTD concept for filtering by available context."
+
+[fields.gtd_category]
+type = "string"
+required = true
+values = ["next_action", "waiting_for", "someday_maybe", "reference", "incubate"]
+uda = true
+description = "GTD processing category. 'next_action' = do it, 'waiting_for' = delegated, 'someday_maybe' = not committed."
+
+[fields.gtd_energy]
+type = "string"
+required = false
+values = ["high", "medium", "low"]
+uda = true
+description = "Energy level required. Filter tasks by current energy state."
+
+[fields.gtd_time_required]
+type = "string"
+required = false
+values = ["5min", "15min", "30min", "1hr", "2hr", "half_day", "full_day"]
+uda = true
+description = "Estimated time needed. Helps select tasks that fit available time slots."
+
+[fields.gtd_delegated_to]
+type = "string"
+required = false
+uda = true
+description = "Person or team this is delegated to. Required when gtd_category is 'waiting_for'."
+
+[fields.gtd_review_date]
+type = "date"
+required = false
+uda = true
+description = "Next weekly review date for this item."
+
+# --- Conditional Requirements ---
+
+[conditions.waiting_for]
+when = "gtd_category == 'waiting_for'"
+then_required = ["gtd_delegated_to"]
+description = "Delegated tasks must specify who is responsible."
+
+# --- LLM Generation Fields ---
+
+[llm_provenance.gen_model]
+type = "string"
+required = false
+description = "LLM model that generated this task."
+
+[llm_provenance.gen_persona]
+type = "string"
+required = false
+description = "Persona or system prompt used."
+
+[llm_provenance.gen_harness]
+type = "string"
+required = false
+description = "Tool that produced this task."
+
+# --- Taskwarrior UDA Registration ---
+# These lines can be added to .taskrc to register the UDAs:
+#
+# uda.gtd_context.type=string
+# uda.gtd_context.label=Context
+# uda.gtd_context.values=desk,computer,phone,errands,home,office,anywhere,agenda
+#
+# uda.gtd_category.type=string
+# uda.gtd_category.label=GTD Category
+# uda.gtd_category.values=next_action,waiting_for,someday_maybe,reference,incubate
+#
+# uda.gtd_energy.type=string
+# uda.gtd_energy.label=Energy
+# uda.gtd_energy.values=high,medium,low
+#
+# uda.gtd_time_required.type=string
+# uda.gtd_time_required.label=Time Required
+# uda.gtd_time_required.values=5min,15min,30min,1hr,2hr,half_day,full_day
+#
+# uda.gtd_delegated_to.type=string
+# uda.gtd_delegated_to.label=Delegated To
+#
+# uda.gtd_review_date.type=date
+# uda.gtd_review_date.label=Review Date

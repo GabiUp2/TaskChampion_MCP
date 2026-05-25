@@ -1,0 +1,146 @@
+# TaskChampion MCP — Scrum Schema
+# Sprint-based agile workflow with story points, sprint IDs, and acceptance criteria.
+# Suitable for teams or solo developers using Scrum methodology.
+#
+# Schema version: 1.0.0
+
+[meta]
+name = "scrum"
+version = "1.0.0"
+description = "Scrum/agile workflow with sprints, story points, and acceptance criteria"
+taskwarrior_version = "3.x"
+
+# --- Built-in Fields ---
+
+[fields.description]
+type = "string"
+required = true
+description = "User story or task description. Prefer 'As a <role>, I want <goal> so that <benefit>' format for stories."
+
+[fields.project]
+type = "string"
+required = true
+description = "Product or component name in dot-notation (e.g., 'myapp.backend.auth')."
+
+[fields.priority]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+description = "Priority within the sprint backlog."
+
+[fields.tags]
+type = "list"
+required = false
+description = "Technology tags, component labels, or cross-cutting concerns."
+
+[fields.due]
+type = "date"
+required = false
+description = "Sprint end date or hard deadline."
+
+[fields.depends]
+type = "string"
+required = false
+description = "UUIDs of blocking tasks or prerequisite stories."
+
+[fields.annotations]
+type = "list"
+required = false
+description = "Acceptance criteria, design notes, links to specs or mockups."
+
+# --- Scrum-Specific UDAs ---
+
+[fields.sprint_id]
+type = "string"
+required = true
+uda = true
+description = "Sprint identifier (e.g., 'sprint-42', '2026-w22'). Groups tasks into sprint iterations."
+
+[fields.story_points]
+type = "string"
+required = true
+values = ["1", "2", "3", "5", "8", "13", "21"]
+uda = true
+description = "Fibonacci story point estimate. Represents relative complexity, not hours."
+
+[fields.story_type]
+type = "string"
+required = true
+values = ["story", "task", "bug", "spike", "chore"]
+uda = true
+description = "Type of backlog item. 'story'=user-facing feature, 'task'=technical work, 'bug'=defect, 'spike'=research, 'chore'=maintenance."
+
+[fields.sprint_status]
+type = "string"
+required = true
+values = ["backlog", "sprint_backlog", "in_progress", "in_review", "done"]
+uda = true
+description = "Scrum board status. Tracks the item through the sprint workflow."
+
+[fields.acceptance_criteria]
+type = "string"
+required = false
+uda = true
+description = "Comma-separated acceptance criteria. Each criterion should be independently verifiable."
+
+[fields.epic]
+type = "string"
+required = false
+uda = true
+description = "Parent epic name for grouping related stories across sprints."
+
+[fields.assignee]
+type = "string"
+required = false
+uda = true
+description = "Team member assigned to this item."
+
+# --- Conditional Requirements ---
+
+[conditions.bug_requires_steps]
+when = "story_type == 'bug'"
+then_required = ["annotations"]
+description = "Bugs should have reproduction steps in annotations."
+
+# --- LLM Generation Fields ---
+
+[llm_provenance.gen_model]
+type = "string"
+required = false
+description = "LLM model that generated this task."
+
+[llm_provenance.gen_persona]
+type = "string"
+required = false
+description = "Persona or system prompt used."
+
+[llm_provenance.gen_harness]
+type = "string"
+required = false
+description = "Tool that produced this task."
+
+# --- Taskwarrior UDA Registration ---
+#
+# uda.sprint_id.type=string
+# uda.sprint_id.label=Sprint
+#
+# uda.story_points.type=string
+# uda.story_points.label=Points
+# uda.story_points.values=1,2,3,5,8,13,21
+#
+# uda.story_type.type=string
+# uda.story_type.label=Type
+# uda.story_type.values=story,task,bug,spike,chore
+#
+# uda.sprint_status.type=string
+# uda.sprint_status.label=Status
+# uda.sprint_status.values=backlog,sprint_backlog,in_progress,in_review,done
+#
+# uda.acceptance_criteria.type=string
+# uda.acceptance_criteria.label=Acceptance Criteria
+#
+# uda.epic.type=string
+# uda.epic.label=Epic
+#
+# uda.assignee.type=string
+# uda.assignee.label=Assignee

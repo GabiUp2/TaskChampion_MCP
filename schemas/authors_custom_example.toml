@@ -1,0 +1,316 @@
+# TaskChampion MCP — Author's Custom Example Schema
+# A real-world advanced schema used by the project author for personal and work
+# task management. Demonstrates the full UDA system with lifecycle phases,
+# hypothesis-driven research, LLM provenance tracking, and urgency tuning.
+#
+# Based on: user/TAXONOMY.md and user/LLM_AGENT_GUIDE.md
+# Taskwarrior config: ~/.config/task/meta.taskrc
+#
+# Schema version: 1.0.0
+
+[meta]
+name = "authors_custom_example"
+version = "1.0.0"
+description = "Advanced personal/work schema with lifecycle phases, hypothesis-driven research, decision tracking, and LLM provenance"
+taskwarrior_version = "3.x"
+notes = "This schema ships as an example of a complex real-world setup. Adapt freely."
+
+# =============================================================================
+# Built-in Taskwarrior Fields
+# =============================================================================
+
+[fields.description]
+type = "string"
+required = true
+description = "Imperative sentence, specific and actionable. Must describe what to do, not what happened."
+
+[fields.project]
+type = "string"
+required = true
+description = """Dot-notation hierarchy, max 4 levels deep, always lowercase.
+Personal: personal.<area>.<host>.<subsystem>
+Work: work.<org>.<client>.<domain>
+Examples: 'personal.infra.myserver.backup', 'work.acme.globex.monitoring'"""
+
+[fields.priority]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+description = "Built-in Taskwarrior priority. Use sparingly — urgency model handles most ordering."
+
+[fields.tags]
+type = "list"
+required = false
+description = """Technology and operational tags. Lowercase preferred.
+Technology: +linux, +python, +rust, +terraform, +docker, +ansible, +nvim
+Operational: +next (today's focus), +waiting (blocked on someone), +ops (on-call)
+Avoid: using tags for things covered by UDAs (scope, phase, area, client)."""
+
+[fields.due]
+type = "date"
+required = false
+description = "Hard deadline only. Do not use for aspirational dates."
+
+[fields.wait]
+type = "date"
+required = false
+description = "Date when task becomes visible. Hides task until this date."
+
+[fields.depends]
+type = "string"
+required = false
+description = "Comma-separated UUIDs of prerequisite tasks."
+
+[fields.annotations]
+type = "list"
+required = false
+description = """Free-text notes and links. Use for:
+- Rationale and context ('Decision: chose restic — simpler retention DSL')
+- Reference links ('https://restic.readthedocs.io — see §3.2')
+- Progress updates
+Prefer annotations over field mutations for narrative context."""
+
+# =============================================================================
+# UDA Fields — Core Taxonomy
+# =============================================================================
+
+[fields.scope]
+type = "string"
+required = true
+values = ["personal", "work"]
+uda = true
+description = "Top-level discriminator. Every task must have one. Use in filters to isolate domains."
+
+[fields.client]
+type = "string"
+required = false
+uda = true
+description = "Work tasks only. Client or org name, lowercase. Examples: 'acme', 'globex'. Omit for personal tasks."
+
+[fields.area]
+type = "string"
+required = true
+values = ["infra", "dev", "learning", "ops", "data", "security", "tooling", "career"]
+uda = true
+description = """Functional domain for cross-project clustering.
+infra=servers/networking, dev=coding/setup, learning=courses/reading,
+ops=CI-CD/monitoring, data=pipelines/analytics, security=hardening/audit,
+tooling=dev-tools/productivity, career=professional-development."""
+
+[fields.phase]
+type = "string"
+required = true
+values = ["idea", "research", "design", "testing", "impl", "validate", "blocked"]
+uda = true
+description = """Lifecycle position. The most important UDA for situational awareness.
+Typical progression: idea → research → design → testing → impl → validate → done
+  idea: captured, not evaluated (parking lot)
+  research: actively gathering info for a decision
+  design: translating research into concrete plans
+  testing: running experiments, A/B evaluation
+  impl: committed direction, executing
+  validate: work done, needs validation/retro
+  blocked: cannot proceed, external dependency"""
+
+# =============================================================================
+# UDA Fields — Research & Decision Tracking
+# =============================================================================
+
+[fields.hypothesis]
+type = "string"
+required = false
+uda = true
+description = """Falsifiable claim being investigated. Required when phase is 'research' or 'testing'.
+Examples: 'restic is faster than borgbackup for incremental backups on Pi 4 hardware'
+Refinements should be annotated, not silently overwritten."""
+
+[fields.versus]
+type = "string"
+required = false
+uda = true
+description = """Options under comparison. Required when phase is 'testing'.
+Format: 'Option A vs Option B [vs Option C]'
+Examples: 'restic vs borgbackup', 'Tailscale vs Cloudflare Tunnel vs WireGuard'"""
+
+[fields.decides]
+type = "string"
+required = false
+uda = true
+description = """What architectural/design decision this task informs or resolves.
+Used by LLMs to cluster related research/testing tasks.
+Examples: 'backup solution for homelab', 'remote access method for homelab'"""
+
+# =============================================================================
+# UDA Fields — Estimation & Confidence
+# =============================================================================
+
+[fields.effort]
+type = "string"
+required = false
+values = ["XS", "S", "M", "L", "XL"]
+uda = true
+description = """T-shirt size estimate. Order of magnitude, not hours.
+XS: <30min, S: <2hr, M: half-day, L: 1-2 days, XL: multi-day/architectural."""
+
+[fields.confidence]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+uda = true
+description = """How well-defined this task is. Affects urgency.
+H: clear scope and done criteria (+1.0 urgency)
+M: generally understood, some ambiguity
+L: fuzzy, needs decomposition (-1.5 urgency)"""
+
+# =============================================================================
+# UDA Fields — LLM Provenance
+# =============================================================================
+
+[fields.gen_model]
+type = "string"
+required = false
+uda = true
+description = """LLM model that generated or substantially contributed to this task.
+Leave empty for human-authored tasks. Use canonical model string.
+Examples: 'claude-sonnet-4-20250514', 'gpt-4o', 'gemini-2.5-pro'
+IMMUTABLE after creation — do not modify on existing tasks."""
+
+[fields.gen_persona]
+type = "string"
+required = false
+uda = true
+description = """Named persona or system-prompt context used during generation.
+Captures which role the LLM was playing.
+Examples: 'DSSD', 'default', 'senior-sre', 'data-engineer'
+IMMUTABLE after creation."""
+
+[fields.gen_harness]
+type = "string"
+required = false
+uda = true
+description = """Tool or integration that produced this task.
+human: human-authored (or leave empty)
+cowork: generated in Cowork mode
+claude-code: generated via Claude Code CLI
+api: generated via direct API call
+mcp: generated by an LLM via MCP tools
+IMMUTABLE after creation."""
+
+# =============================================================================
+# UDA Fields — Review
+# =============================================================================
+
+[fields.review]
+type = "date"
+required = false
+uda = true
+description = "When to revisit this task. Use on phase:blocked and phase:idea tasks to prevent them from becoming invisible."
+
+# =============================================================================
+# Conditional Requirements
+# =============================================================================
+
+[conditions.research_needs_hypothesis]
+when = "phase == 'research'"
+then_required = ["hypothesis"]
+description = "Research tasks must state the question being investigated."
+
+[conditions.testing_needs_hypothesis_and_versus]
+when = "phase == 'testing'"
+then_required = ["hypothesis", "versus"]
+description = "Testing tasks must state the hypothesis and the options being compared."
+
+[conditions.work_needs_client]
+when = "scope == 'work'"
+then_required = ["client"]
+description = "Work tasks must specify the client or org."
+
+[conditions.llm_generated_needs_provenance]
+when = "gen_harness != ''"
+then_required = ["gen_model", "gen_persona", "gen_harness"]
+description = "LLM-generated tasks must have full provenance (model, persona, harness)."
+
+# =============================================================================
+# Urgency Coefficients
+# =============================================================================
+# These map to Taskwarrior urgency.uda.<field>.<value>.coefficient settings.
+
+[urgency]
+description = "Custom urgency tuning. Higher = surfaces sooner in reports."
+
+[urgency.scope]
+work = 1.5
+
+[urgency.phase]
+impl = 2.0
+testing = 1.5
+design = 1.0
+validate = 1.0
+research = 0.5
+idea = -2.0
+blocked = -5.0
+
+[urgency.confidence]
+H = 1.0
+L = -1.5
+
+[urgency.effort]
+XS = 0.3
+XL = -0.5
+
+# =============================================================================
+# Custom Reports
+# =============================================================================
+
+[reports.urgent]
+description = "Cross-project urgency triage (top 25)"
+filter = "status:pending -WAITING"
+sort = "urgency-"
+limit = 25
+
+[reports.focus]
+description = "Ready-to-execute tasks (phase:impl, top 15)"
+filter = "status:pending phase:impl -WAITING"
+sort = "urgency-"
+limit = 15
+
+[reports.research]
+description = "Research and testing tasks with hypothesis context"
+filter = "status:pending phase.is:research,testing -WAITING"
+sort = "urgency-"
+
+[reports.blocked_tasks]
+description = "Blocked tasks awaiting resolution"
+filter = "status:pending phase:blocked -WAITING"
+sort = "review+,urgency-"
+
+[reports.llmgen]
+description = "LLM-generated tasks by entry date"
+filter = "status:pending gen_model.any: -WAITING"
+sort = "entry-"
+
+# =============================================================================
+# Phase Promotion Guide
+# =============================================================================
+
+[phase_transitions]
+description = "Rules for promoting tasks between phases."
+
+[phase_transitions.idea_to_research]
+add_fields = ["hypothesis"]
+description = "Add hypothesis describing what you're investigating."
+
+[phase_transitions.research_to_testing]
+add_fields = ["versus"]
+description = "Add versus naming the options. Keep hypothesis."
+
+[phase_transitions.testing_to_impl]
+annotate = "Decision: chose <option> — <brief reason>"
+description = "Commit to a direction. Annotate the decision. hypothesis/versus remain for audit trail."
+
+[phase_transitions.impl_to_validate]
+description = "Work complete, needs validation or retrospective."
+
+[phase_transitions.validate_to_done]
+annotate = "Outcome: <what was decided and why>"
+description = "If part of a decides: decision tree, annotate the outcome."

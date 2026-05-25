@@ -1,0 +1,338 @@
+[
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000001",
+    "id": 1,
+    "description": "Research borgbackup vs restic for Pi 4 incremental backups",
+    "status": "pending",
+    "project": "personal.infra.myserver.backup",
+    "tags": [
+      "linux",
+      "ansible"
+    ],
+    "entry": "20260501T080000Z",
+    "modified": "20260520T090000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "research",
+    "hypothesis": "restic is faster and simpler to configure than borgbackup on aarch64",
+    "versus": "restic vs borgbackup",
+    "decides": "backup solution for homelab",
+    "effort": "S",
+    "confidence": "M",
+    "gen_model": "claude-sonnet-4-20250514",
+    "gen_persona": "DSSD",
+    "gen_harness": "cowork",
+    "urgency": 6.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000002",
+    "id": 2,
+    "description": "Implement automated backup with chosen solution on homelab server",
+    "status": "pending",
+    "project": "personal.infra.myserver.backup",
+    "tags": [
+      "linux",
+      "ansible"
+    ],
+    "entry": "20260501T083000Z",
+    "modified": "20260520T090000Z",
+    "depends": "e5000001-0000-0000-0000-000000000001",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "impl",
+    "decides": "backup solution for homelab",
+    "effort": "M",
+    "confidence": "L",
+    "gen_model": "claude-sonnet-4-20250514",
+    "gen_persona": "DSSD",
+    "gen_harness": "cowork",
+    "urgency": 5.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000003",
+    "id": 3,
+    "description": "Evaluate Tailscale vs WireGuard for homelab remote access",
+    "status": "pending",
+    "project": "personal.infra.myserver.services",
+    "tags": [
+      "networking",
+      "vpn"
+    ],
+    "entry": "20260502T100000Z",
+    "modified": "20260515T140000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "testing",
+    "hypothesis": "Tailscale is sufficient for homelab remote access without Cloudflare Tunnel",
+    "versus": "Tailscale vs Cloudflare Tunnel vs WireGuard",
+    "decides": "remote access method for homelab",
+    "effort": "M",
+    "confidence": "M",
+    "urgency": 8.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000004",
+    "id": 4,
+    "description": "Set up Ansible playbook for repeatable homelab provisioning",
+    "status": "pending",
+    "project": "personal.infra.myserver.configuration",
+    "tags": [
+      "ansible",
+      "linux"
+    ],
+    "entry": "20260503T080000Z",
+    "modified": "20260522T100000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "impl",
+    "effort": "L",
+    "confidence": "H",
+    "urgency": 11.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000005",
+    "id": 5,
+    "description": "Document homelab initial setup and service inventory",
+    "status": "pending",
+    "project": "personal.infra.myserver.documentation",
+    "tags": [
+      "documentation"
+    ],
+    "entry": "20260504T090000Z",
+    "modified": "20260504T090000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "idea",
+    "effort": "S",
+    "confidence": "H",
+    "urgency": -0.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000006",
+    "id": 6,
+    "description": "Configure Prometheus and Grafana monitoring stack on homelab server",
+    "status": "pending",
+    "project": "personal.infra.myserver.services",
+    "tags": [
+      "monitoring",
+      "docker"
+    ],
+    "entry": "20260505T100000Z",
+    "modified": "20260505T100000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "design",
+    "effort": "M",
+    "confidence": "M",
+    "urgency": 4.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000007",
+    "id": 7,
+    "description": "Prepare Databricks Data Engineer Associate exam study plan",
+    "status": "pending",
+    "project": "personal.learning.certs",
+    "tags": [
+      "databricks",
+      "certification"
+    ],
+    "entry": "20260506T080000Z",
+    "modified": "20260520T080000Z",
+    "due": "20260701T000000Z",
+    "scope": "personal",
+    "area": "learning",
+    "phase": "impl",
+    "effort": "XL",
+    "confidence": "H",
+    "urgency": 12.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000008",
+    "id": 8,
+    "description": "Set up Taskwarrior MCP server for LLM task cooperation",
+    "status": "pending",
+    "project": "personal.tooling.taskwarrior.addons",
+    "tags": [
+      "taskwarrior",
+      "python",
+      "mcp"
+    ],
+    "entry": "20260520T100000Z",
+    "modified": "20260525T100000Z",
+    "scope": "personal",
+    "area": "tooling",
+    "phase": "impl",
+    "effort": "XL",
+    "confidence": "M",
+    "decides": "LLM plugin choice for taskwarrior",
+    "gen_model": "claude-sonnet-4-20250514",
+    "gen_persona": "default",
+    "gen_harness": "mcp",
+    "annotations": [
+      {
+        "entry": "20260525T100000Z",
+        "description": "Project bootstrapped. ADRs 0-10 registered. Schema presets created."
+      }
+    ],
+    "urgency": 10.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000009",
+    "id": 9,
+    "description": "Deploy monitoring alerts for client data pipeline SLAs",
+    "status": "pending",
+    "project": "work.acme.globex.monitoring",
+    "tags": [
+      "monitoring",
+      "azure",
+      "databricks"
+    ],
+    "entry": "20260510T080000Z",
+    "modified": "20260522T140000Z",
+    "due": "20260530T000000Z",
+    "scope": "work",
+    "client": "globex",
+    "area": "ops",
+    "phase": "impl",
+    "effort": "M",
+    "confidence": "H",
+    "priority": "H",
+    "urgency": 16.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000010",
+    "id": 10,
+    "description": "Create internal config management demo for org team",
+    "status": "pending",
+    "project": "work.acme.internal.configmgmt",
+    "tags": [
+      "ansible",
+      "terraform"
+    ],
+    "entry": "20260512T090000Z",
+    "modified": "20260512T090000Z",
+    "scope": "work",
+    "client": "acme",
+    "area": "ops",
+    "phase": "design",
+    "effort": "L",
+    "confidence": "M",
+    "urgency": 5.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000011",
+    "id": 11,
+    "description": "Investigate ncspot as terminal Spotify client",
+    "status": "pending",
+    "project": "personal.dev.workstation",
+    "tags": [
+      "rust",
+      "nvim"
+    ],
+    "entry": "20260515T110000Z",
+    "modified": "20260515T110000Z",
+    "scope": "personal",
+    "area": "dev",
+    "phase": "idea",
+    "hypothesis": "ncspot is a viable terminal Spotify client for daily use",
+    "effort": "XS",
+    "confidence": "L",
+    "urgency": -2.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000012",
+    "id": 12,
+    "description": "Validate homelab security hardening checklist",
+    "status": "pending",
+    "project": "personal.infra.myserver.security",
+    "tags": [
+      "security",
+      "linux"
+    ],
+    "entry": "20260518T080000Z",
+    "modified": "20260524T090000Z",
+    "scope": "personal",
+    "area": "security",
+    "phase": "validate",
+    "effort": "S",
+    "confidence": "H",
+    "annotations": [
+      {
+        "entry": "20260524T090000Z",
+        "description": "SSH hardened, fail2ban configured, UFW rules applied. Needs final review."
+      }
+    ],
+    "urgency": 7.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000013",
+    "id": 13,
+    "description": "Research CI/CD approach for homelab services",
+    "status": "pending",
+    "project": "personal.infra.myserver.automation",
+    "tags": [
+      "ci-cd",
+      "docker"
+    ],
+    "entry": "20260519T100000Z",
+    "modified": "20260519T100000Z",
+    "scope": "personal",
+    "area": "ops",
+    "phase": "blocked",
+    "decides": "CI/CD approach for homelab services",
+    "effort": "L",
+    "confidence": "L",
+    "review": "20260601T000000Z",
+    "annotations": [
+      {
+        "entry": "20260519T110000Z",
+        "description": "Blocked: need to finalize Ansible playbook first (depends on task e5000001-...-04)"
+      }
+    ],
+    "urgency": -3.0
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000014",
+    "id": 14,
+    "description": "Create Taskwarrior cheatsheet with custom report examples",
+    "status": "pending",
+    "project": "personal.tooling.taskwarrior.cheatsheet",
+    "tags": [
+      "taskwarrior",
+      "documentation"
+    ],
+    "entry": "20260520T140000Z",
+    "modified": "20260520T140000Z",
+    "scope": "personal",
+    "area": "tooling",
+    "phase": "impl",
+    "effort": "S",
+    "confidence": "H",
+    "urgency": 8.5
+  },
+  {
+    "uuid": "e5000001-0000-0000-0000-000000000015",
+    "id": 15,
+    "description": "Evaluate Terraform vs Pulumi for homelab infrastructure-as-code",
+    "status": "pending",
+    "project": "personal.infra.myserver.configuration",
+    "tags": [
+      "terraform",
+      "iac"
+    ],
+    "entry": "20260521T080000Z",
+    "modified": "20260521T080000Z",
+    "scope": "personal",
+    "area": "infra",
+    "phase": "research",
+    "hypothesis": "Terraform is better suited than Pulumi for a small homelab due to wider community support",
+    "versus": "Terraform vs Pulumi",
+    "decides": "IaC approach for homelab",
+    "effort": "M",
+    "confidence": "M",
+    "gen_model": "gpt-4o",
+    "gen_persona": "senior-sre",
+    "gen_harness": "api",
+    "urgency": 5.0
+  }
+]

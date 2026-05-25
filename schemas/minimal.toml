@@ -1,0 +1,75 @@
+# TaskChampion MCP — Minimal Schema
+# The simplest possible task schema using only Taskwarrior built-in fields.
+# Good for users who want basic task management without custom UDAs.
+#
+# Schema version: 1.0.0
+
+[meta]
+name = "minimal"
+version = "1.0.0"
+description = "Basic task management with built-in Taskwarrior fields only"
+taskwarrior_version = "3.x"
+
+# --- Field Definitions ---
+# Each field defines: type, required, values (if enum), default, and description.
+# The MCP server uses these to validate LLM-generated tasks and provide context.
+
+[fields.description]
+type = "string"
+required = true
+description = "Imperative sentence describing the task. Must be specific and actionable."
+
+[fields.project]
+type = "string"
+required = false
+description = "Dot-notation project hierarchy (e.g., 'work.client.feature')."
+
+[fields.priority]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+description = "Task priority. H=high, M=medium, L=low."
+
+[fields.tags]
+type = "list"
+required = false
+description = "List of tags for cross-cutting categorization (e.g., +python, +urgent)."
+
+[fields.due]
+type = "date"
+required = false
+description = "Due date in ISO format or Taskwarrior relative syntax (e.g., 'eow', '2026-06-01')."
+
+[fields.depends]
+type = "string"
+required = false
+description = "Comma-separated UUIDs of tasks this depends on."
+
+[fields.annotations]
+type = "list"
+required = false
+description = "List of annotation strings (notes, links, context)."
+
+# --- Conditional Requirements ---
+# None for minimal schema.
+
+# --- LLM Generation Fields ---
+# These are always recommended when an LLM creates a task, regardless of schema.
+
+[llm_provenance]
+description = "Fields for tracking LLM-generated tasks. Recommended but not enforced in minimal schema."
+
+[llm_provenance.gen_model]
+type = "string"
+required = false
+description = "LLM model that generated this task (e.g., 'claude-sonnet-4-20250514')."
+
+[llm_provenance.gen_persona]
+type = "string"
+required = false
+description = "Persona or system prompt used during generation."
+
+[llm_provenance.gen_harness]
+type = "string"
+required = false
+description = "Tool that produced this task (e.g., 'mcp', 'claude-code', 'cowork')."

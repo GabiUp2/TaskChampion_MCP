@@ -1,0 +1,146 @@
+# TaskChampion MCP — Kanban Schema
+# Flow-based workflow with board columns, WIP limits, and cycle time tracking.
+# Suitable for continuous delivery teams or personal task flow management.
+#
+# Schema version: 1.0.0
+
+[meta]
+name = "kanban"
+version = "1.0.0"
+description = "Kanban board workflow with columns, WIP limits, and flow metrics"
+taskwarrior_version = "3.x"
+
+# --- Built-in Fields ---
+
+[fields.description]
+type = "string"
+required = true
+description = "Clear, actionable work item description."
+
+[fields.project]
+type = "string"
+required = false
+description = "Product, service, or workstream in dot-notation."
+
+[fields.priority]
+type = "string"
+required = false
+values = ["H", "M", "L"]
+description = "Priority for ordering within a column."
+
+[fields.tags]
+type = "list"
+required = false
+description = "Freeform tags for categorization."
+
+[fields.due]
+type = "date"
+required = false
+description = "Service-level deadline, if applicable."
+
+[fields.depends]
+type = "string"
+required = false
+description = "UUIDs of blocking items."
+
+[fields.annotations]
+type = "list"
+required = false
+description = "Notes, links, blockers, handoff instructions."
+
+# --- Kanban-Specific UDAs ---
+
+[fields.board_column]
+type = "string"
+required = true
+values = ["backlog", "ready", "in_progress", "review", "done"]
+uda = true
+description = "Current board column. Items flow left-to-right: backlog → ready → in_progress → review → done."
+
+[fields.item_type]
+type = "string"
+required = true
+values = ["feature", "bug", "improvement", "maintenance", "expedite"]
+uda = true
+description = "Work item classification. 'expedite' items bypass WIP limits."
+
+[fields.item_size]
+type = "string"
+required = false
+values = ["S", "M", "L"]
+uda = true
+description = "Relative size for flow forecasting. S=1-2 days, M=3-5 days, L=5+ days."
+
+[fields.blocked_reason]
+type = "string"
+required = false
+uda = true
+description = "Why this item is blocked. Set when item cannot progress despite being in an active column."
+
+[fields.swimlane]
+type = "string"
+required = false
+uda = true
+description = "Horizontal swimlane for visual grouping (e.g., 'frontend', 'backend', 'ops')."
+
+[fields.class_of_service]
+type = "string"
+required = false
+values = ["standard", "fixed_date", "expedite", "intangible"]
+uda = true
+description = "Kanban class of service. Determines scheduling policy and WIP limit treatment."
+
+# --- WIP Limits (advisory, enforced by MCP server) ---
+
+[wip_limits]
+description = "Maximum items allowed in each column. MCP server should warn when exceeded."
+in_progress = 3
+review = 2
+
+# --- Conditional Requirements ---
+
+[conditions.blocked_needs_reason]
+when = "blocked_reason != ''"
+then_required = ["annotations"]
+description = "Blocked items should have context in annotations about the blocker."
+
+# --- LLM Generation Fields ---
+
+[llm_provenance.gen_model]
+type = "string"
+required = false
+description = "LLM model that generated this task."
+
+[llm_provenance.gen_persona]
+type = "string"
+required = false
+description = "Persona or system prompt used."
+
+[llm_provenance.gen_harness]
+type = "string"
+required = false
+description = "Tool that produced this task."
+
+# --- Taskwarrior UDA Registration ---
+#
+# uda.board_column.type=string
+# uda.board_column.label=Column
+# uda.board_column.values=backlog,ready,in_progress,review,done
+#
+# uda.item_type.type=string
+# uda.item_type.label=Type
+# uda.item_type.values=feature,bug,improvement,maintenance,expedite
+#
+# uda.item_size.type=string
+# uda.item_size.label=Size
+# uda.item_size.values=S,M,L
+#
+# uda.blocked_reason.type=string
+# uda.blocked_reason.label=Blocked Reason
+#
+# uda.swimlane.type=string
+# uda.swimlane.label=Swimlane
+#
+# uda.class_of_service.type=string
+# uda.class_of_service.label=Class of Service
+# uda.class_of_service.values=standard,fixed_date,expedite,intangible
