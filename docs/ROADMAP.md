@@ -78,8 +78,8 @@ The minimum viable MCP server: read, write, and manage tasks via LLM with securi
 - [ ] awesome-mcp-servers PR
 
 ### Testing
-- [ ] Unit tests for input sanitization
-- [ ] Unit tests for schema validation
+- [x] Unit tests for input sanitization
+- [x] Unit tests for schema validation
 - [x] Unit tests for runtime onboarding and first-run schema preview/save flow
 - [ ] Unit tests for role-based tool filtering
 - [ ] Integration tests using gold dataset fixtures
