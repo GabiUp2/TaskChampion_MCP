@@ -1,0 +1,47 @@
+# TaskChampion MCP — Example Configuration
+# Copy to: ~/.config/taskchampion-mcp/config.toml
+# See docs/adrs/ADRs.md for rationale behind each setting.
+
+[server]
+# Role determines which MCP tools are available to the LLM.
+# CONTRIBUTOR — read, annotate, modify existing tasks
+# GENERATOR   — + create new tasks
+# MANAGER     — + complete, delete, undo, sync
+role = "CONTRIBUTOR"
+
+# Schema preset name (from schemas/ directory) or path to a custom .toml file.
+schema = "minimal"
+# schema_path = "/path/to/custom_schema.toml"
+
+# Path to the Taskwarrior binary (default: "task")
+# task_binary = "task"
+
+# Path to the Timewarrior binary (default: "timew")
+# timew_binary = "timew"
+
+# Override Taskwarrior rc file (optional)
+# taskrc = "/home/user/.config/task/taskrc"
+
+[security]
+# Maximum MCP operations per minute (sliding window).
+rate_limit_per_minute = 30
+
+# Maximum MCP operations per hour (sliding window).
+rate_limit_per_hour = 200
+
+# Maximum task creation operations per hour (sliding window).
+create_limit_per_hour = 50
+
+# If true, destructive operations (complete, delete) require a second call to confirm.
+require_confirmation = true
+
+# If true, destructive operations default to dry-run mode.
+dry_run_default = false
+
+# Fields to strip from task data before returning to the LLM.
+# redacted_fields = ["client", "hypothesis"]
+
+[logging]
+# Path to the audit log file.
+# Default: ~/.local/share/taskchampion-mcp/audit.log
+# audit_log = "/home/user/.local/share/taskchampion-mcp/audit.log"
