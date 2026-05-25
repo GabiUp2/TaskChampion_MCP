@@ -25,8 +25,10 @@ from taskchampion_mcp.onboarding import (
     analyse_taxonomy_file as onboarding_analyse_taxonomy_file,
     generate_schema_preview as onboarding_generate_schema_preview,
     get_initialisation_status as onboarding_get_initialisation_status,
+    list_preset_schemas as onboarding_list_preset_schemas,
     propose_initialisation_options as onboarding_propose_initialisation_options,
     save_initial_schema as onboarding_save_initial_schema,
+    use_preset_schema as onboarding_use_preset_schema,
 )
 from taskchampion_mcp.rate_limiter import RateLimiter
 from taskchampion_mcp.schema import TaskSchema, load_schema
@@ -234,6 +236,48 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 schema_toml=schema_toml,
                 taxonomy_path=taxonomy_path or None,
                 output_path=output_path or None,
+                overwrite=overwrite,
+                update_config=update_config,
+            )
+        )
+
+    @mcp.tool()
+    def list_preset_schemas() -> str:
+        """List bundled preset schemas (minimal, gtd, kanban, scrum, ...).
+
+        Read-only. Returns each preset's name, file path, version and
+        description as parsed from the schema's [meta] block. Use this
+        before calling use_preset_schema so the user can see what is
+        available without you guessing the preset names.
+        """
+        return json.dumps(onboarding_list_preset_schemas())
+
+    @mcp.tool()
+    def use_preset_schema(
+        preset_name: str,
+        taxonomy_path: str = "",
+        output_path: str = "",
+        copy: bool = False,
+        overwrite: bool = False,
+        update_config: bool = True,
+    ) -> str:
+        """Wire a bundled preset schema into the user's config.toml.
+
+        By default this just sets ``schema = "<preset_name>"`` in config.toml
+        (lowest friction; keeps using the version-controlled bundled file).
+        Pass copy=true to copy the preset into output_path (or the user
+        config dir) and reference that copy via schema_path — use this when
+        the user wants a personal, editable copy.
+
+        Refuses to overwrite an existing target file when copy=true unless
+        overwrite=true.
+        """
+        return json.dumps(
+            onboarding_use_preset_schema(
+                preset_name=preset_name,
+                taxonomy_path=taxonomy_path or None,
+                output_path=output_path or None,
+                copy=copy,
                 overwrite=overwrite,
                 update_config=update_config,
             )
@@ -486,8 +530,22 @@ def _build_instructions(
         "",
         "FIRST-RUN / TAXONOMY RULES:",
         "- If task semantics are unclear, call get_initialisation_status first.",
-        "- If no custom schema or taxonomy is configured, ask the user for a taxonomy file or offer schema inference from existing tasks.",
-        "- Generate schema previews before saving; do not silently invent workflow semantics.",
+        (
+            "- If onboarding is needed, call propose_initialisation_options "
+            "and present the choices to the user."
+        ),
+        (
+            "- For taxonomy / task-inference flows: generate_initial_schema_preview, "
+            "show the TOML to the user, then save_initial_schema."
+        ),
+        (
+            "- For preset selection: list_preset_schemas, let the user pick a name, "
+            "then use_preset_schema."
+        ),
+        (
+            "- Never silently invent workflow semantics. "
+            "Never save a schema the user has not approved."
+        ),
         "",
         "IMPORTANT RULES:",
         "- Always use task UUIDs, never local IDs.",

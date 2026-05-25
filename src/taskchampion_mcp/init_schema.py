@@ -2,43 +2,44 @@
 # Reviewed by: gabiup2
 # Date: 2026-05-25
 
-"""First-run schema initialisation wizard (IDEA-003).
+"""First-run schema initialisation wizard (IDEA-003) — thin CLI layer.
 
 Invoked via ``./dev.sh init`` or ``python -m taskchampion_mcp.init_schema``.
-Analyses existing Taskwarrior tasks, optionally parses a taxonomy file,
-generates a TOML schema, saves it, and updates ``config.toml``.
+
+This module is *intentionally thin*: it adds interactive prompts and coloured
+terminal output, but every decision and every file mutation goes through the
+public API in :mod:`taskchampion_mcp.onboarding`.  That keeps the CLI wizard
+and the runtime MCP onboarding tools behaviourally identical.
+
+The wizard supports three branches, mirroring the options proposed by
+:func:`onboarding.propose_initialisation_options`:
+
+1. Generate a schema from existing tasks and/or a taxonomy file.
+2. Pick a bundled preset (``--preset <name>`` or interactive list).
+3. Abort, leaving the server on the default minimal schema.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from taskchampion_mcp.schema_gen import (
-    generate_schema_from_tasks_and_taxonomy,
-    save_generated_schema,
+from taskchampion_mcp.cli import TaskwarriorCLI
+from taskchampion_mcp.config import default_config_path, load_config
+from taskchampion_mcp.onboarding import (
+    analyse_existing_tasks,
+    default_schema_name_for_source,
+    generate_schema_preview,
+    get_initialisation_status,
+    list_preset_schemas,
+    resolve_taxonomy_path,
+    save_initial_schema,
+    use_preset_schema,
 )
 
 # ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
-_XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-_CONFIG_DIR = _XDG_CONFIG / "taskchampion-mcp"
-_CONFIG_FILE = _CONFIG_DIR / "config.toml"
-_DEFAULT_SCHEMA_OUT = _CONFIG_DIR / "generated_schema.toml"
-
-
-# ---------------------------------------------------------------------------
-# Colours (optional, graceful fallback)
+# Output helpers
 # ---------------------------------------------------------------------------
 
 _CYAN = "\033[0;36m"
@@ -64,139 +65,217 @@ def _fail(msg: str) -> None:
     print(f"{_RED}[FAIL]{_NC}  {msg}")
 
 
-# ---------------------------------------------------------------------------
-# Task export
-# ---------------------------------------------------------------------------
+def _prompt(question: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    answer = input(f"  {question}{suffix}: ").strip()
+    return answer or default
 
 
-def _export_tasks(binary: str = "task") -> list[dict]:
-    """Export all tasks via ``task export``."""
-    try:
-        proc = subprocess.run(
-            [binary, "rc.verbose:nothing", "rc.confirmation:off", "export"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return json.loads(proc.stdout)
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-        _warn(f"Could not export tasks: {exc}")
-    return []
+def _confirm(question: str, default_yes: bool = False) -> bool:
+    suffix = "[Y/n]" if default_yes else "[y/N]"
+    answer = input(f"  {question} {suffix}: ").strip().lower()
+    if not answer:
+        return default_yes
+    return answer in ("y", "yes")
 
 
 # ---------------------------------------------------------------------------
-# Config helpers
+# Generated-schema branch
 # ---------------------------------------------------------------------------
 
 
-def _read_config() -> dict:
-    """Read existing config.toml or return empty dict."""
-    if _CONFIG_FILE.exists():
-        with open(_CONFIG_FILE, "rb") as f:
-            return tomllib.load(f)
-    return {}
+def _run_generate_branch(
+    *,
+    task_cli: TaskwarriorCLI,
+    project_dir: str | None,
+    taxonomy_path: str | None,
+    output_path: str | None,
+    schema_name: str | None,
+    non_interactive: bool,
+) -> bool:
+    """Generate-and-save flow that delegates entirely to onboarding.*."""
+    config = load_config()
 
+    resolved_taxonomy = resolve_taxonomy_path(
+        config=config,
+        taxonomy_path=taxonomy_path,
+        project_dir=project_dir,
+    )
 
-def _write_config(data: dict) -> None:
-    """Write config.toml preserving structure.
+    # Confirm taxonomy choice interactively
+    if not taxonomy_path and resolved_taxonomy is not None and not non_interactive:
+        _ok(f"Detected taxonomy file: {resolved_taxonomy}")
+        if not _confirm("Use this file?", default_yes=True):
+            alt = _prompt("Enter path to taxonomy file (or Enter to skip)")
+            if alt:
+                candidate = Path(alt).expanduser().resolve()
+                if not candidate.exists():
+                    _warn(f"File not found: {candidate}. Skipping taxonomy.")
+                    resolved_taxonomy = None
+                else:
+                    resolved_taxonomy = candidate
+            else:
+                resolved_taxonomy = None
+    elif resolved_taxonomy is None and not non_interactive:
+        _warn("No taxonomy file detected.")
+        alt = _prompt("Enter path to taxonomy file (or Enter to skip)")
+        if alt:
+            candidate = Path(alt).expanduser().resolve()
+            if not candidate.exists():
+                _warn(f"File not found: {candidate}. Skipping taxonomy.")
+            else:
+                resolved_taxonomy = candidate
 
-    Writes only the ``[server]`` section keys we care about,
-    merging with existing content.
-    """
-    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if resolved_taxonomy:
+        _info(f"Using taxonomy: {resolved_taxonomy}")
+    else:
+        _info("Proceeding without taxonomy file.")
 
-    # Read existing raw lines to preserve comments and formatting
-    existing_lines: list[str] = []
-    if _CONFIG_FILE.exists():
-        existing_lines = _CONFIG_FILE.read_text().splitlines()
+    # Sanity check: warn early if neither tasks nor taxonomy are available.
+    task_report = analyse_existing_tasks(task_cli)
+    task_count = int(task_report.get("task_count") or 0)
+    if task_report.get("error"):
+        _warn(f"Task export failed: {task_report.get('message')}")
+    elif task_count:
+        _ok(f"Found {task_count} tasks.")
+    else:
+        _warn("No existing tasks found. Schema will be based on taxonomy only.")
 
-    server = data.get("server", {})
+    if task_count == 0 and resolved_taxonomy is None:
+        _fail("No tasks and no taxonomy file. Cannot generate a schema.")
+        _info("Re-run with --preset <name> to install a bundled preset instead.")
+        return False
 
-    # Check if schema_path is already in the file
-    has_schema_path = any("schema_path" in line for line in existing_lines)
-    has_taxonomy_path = any("taxonomy_path" in line for line in existing_lines)
+    # Generate preview via the shared onboarding API.
+    effective_name = schema_name or default_schema_name_for_source(
+        has_taxonomy=resolved_taxonomy is not None,
+        has_tasks=task_count > 0,
+    )
+    _info("Generating schema...")
+    preview = generate_schema_preview(
+        config=config,
+        task_cli=task_cli,
+        taxonomy_path=str(resolved_taxonomy) if resolved_taxonomy else None,
+        project_dir=project_dir,
+        schema_name=effective_name,
+    )
+    if not preview.get("success"):
+        _fail(preview.get("message", "Schema preview failed."))
+        return False
 
-    new_lines: list[str] = []
-    in_server = False
-    for line in existing_lines:
-        stripped = line.strip()
-        if stripped == "[server]":
-            in_server = True
-        elif stripped.startswith("[") and stripped != "[server]":
-            # Entering a new section — if we were in [server], append our keys
-            if in_server:
-                if not has_schema_path and "schema_path" in server:
-                    new_lines.append(f'schema_path = "{server["schema_path"]}"')
-                if not has_taxonomy_path and "taxonomy_path" in server:
-                    new_lines.append(f'taxonomy_path = "{server["taxonomy_path"]}"')
-            in_server = False
+    # Resolve output target and confirm overwrite.
+    out_path: Path | None = Path(output_path).expanduser() if output_path else None
+    overwrite = False
+    if out_path is None:
+        # _default_schema_path is internal to onboarding; reproduce the
+        # standard location for confirmation messaging.
+        out_path = default_config_path().parent / "generated_schema.toml"
 
-        # Update existing keys
-        if in_server and stripped.startswith("schema_path"):
-            if "schema_path" in server:
-                new_lines.append(f'schema_path = "{server["schema_path"]}"')
-                has_schema_path = True
-                continue
-        if in_server and stripped.startswith("taxonomy_path"):
-            if "taxonomy_path" in server:
-                new_lines.append(f'taxonomy_path = "{server["taxonomy_path"]}"')
-                has_taxonomy_path = True
-                continue
-        # Skip commented schema= if we're setting schema_path
-        if in_server and stripped.startswith("schema ") and "schema_path" in server:
-            new_lines.append(f"# {stripped}  # overridden by schema_path")
-            continue
+    if out_path.exists():
+        if non_interactive:
+            overwrite = True
+        else:
+            if not _confirm(f"Schema file exists: {out_path}\n  Overwrite?", default_yes=False):
+                _info("Aborted. Existing schema kept.")
+                return False
+            overwrite = True
 
-        new_lines.append(line)
+    save_result = save_initial_schema(
+        schema_toml=preview["schema_toml"],
+        taxonomy_path=str(resolved_taxonomy) if resolved_taxonomy else None,
+        output_path=str(out_path),
+        overwrite=overwrite,
+        update_config=True,
+    )
+    if not save_result.get("success"):
+        _fail(save_result.get("message", "Saving schema failed."))
+        return False
 
-    # If we ended while still in [server], append keys
-    if in_server:
-        if not has_schema_path and "schema_path" in server:
-            new_lines.append(f'schema_path = "{server["schema_path"]}"')
-        if not has_taxonomy_path and "taxonomy_path" in server:
-            new_lines.append(f'taxonomy_path = "{server["taxonomy_path"]}"')
-
-    # If file was empty or had no [server] section, write a basic one
-    if not existing_lines or not any(ln.strip() == "[server]" for ln in existing_lines):
-        if not any(ln.strip() == "[server]" for ln in new_lines):
-            new_lines.insert(0, "[server]")
-        if "schema_path" in server:
-            new_lines.append(f'schema_path = "{server["schema_path"]}"')
-        if "taxonomy_path" in server:
-            new_lines.append(f'taxonomy_path = "{server["taxonomy_path"]}"')
-
-    _CONFIG_FILE.write_text("\n".join(new_lines) + "\n")
+    _ok(f"Schema saved to: {save_result['schema_path']}")
+    _ok(f"Config updated: {save_result['config_file']}")
+    print()
+    _ok("Initialisation complete!")
+    print(f"  Schema:   {save_result['schema_path']}")
+    if resolved_taxonomy:
+        print(f"  Taxonomy: {resolved_taxonomy}")
+    print(f"  Config:   {save_result['config_file']}")
+    print()
+    _info("Restart your MCP server to use the new schema.")
+    return True
 
 
 # ---------------------------------------------------------------------------
-# Taxonomy detection
+# Preset branch
 # ---------------------------------------------------------------------------
 
 
-def _find_taxonomy(project_dir: str | None = None) -> Path | None:
-    """Look for a taxonomy file in common locations."""
-    candidates: list[Path] = []
+def _run_preset_branch(
+    *,
+    preset_name: str | None,
+    taxonomy_path: str | None,
+    copy: bool,
+    output_path: str | None,
+    non_interactive: bool,
+) -> bool:
+    """Preset-selection flow that delegates entirely to onboarding.*."""
+    listing = list_preset_schemas()
+    presets = listing.get("presets") or []
+    if not presets:
+        _fail("No bundled preset schemas found.")
+        return False
 
-    if project_dir:
-        p = Path(project_dir)
-        candidates += [
-            p / "user" / "TAXONOMY.md",
-            p / "TAXONOMY.md",
-            p / "docs" / "TAXONOMY.md",
-            p / "taxonomy.md",
-        ]
+    if preset_name is None:
+        if non_interactive:
+            _fail("Preset branch requires --preset <name> in non-interactive mode.")
+            return False
+        _info("Available preset schemas:")
+        for idx, item in enumerate(presets, start=1):
+            description = item.get("description") or "(no description)"
+            print(f"    {idx}. {item['name']:<24} {description}")
+        choice = _prompt("Enter preset name (or number)", default=presets[0]["name"])
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if not 0 <= idx < len(presets):
+                _fail(f"Invalid selection: {choice}")
+                return False
+            preset_name = presets[idx]["name"]
+        else:
+            preset_name = choice
 
-    candidates += [
-        _CONFIG_DIR / "TAXONOMY.md",
-        _CONFIG_DIR / "taxonomy.md",
-        Path.home() / "TAXONOMY.md",
-    ]
+    overwrite = False
+    if copy and output_path:
+        target = Path(output_path).expanduser()
+        if target.exists():
+            if non_interactive:
+                overwrite = True
+            else:
+                if not _confirm(
+                    f"Target file exists: {target}\n  Overwrite?",
+                    default_yes=False,
+                ):
+                    _info("Aborted. Existing file kept.")
+                    return False
+                overwrite = True
 
-    for c in candidates:
-        if c.exists():
-            return c.resolve()
-    return None
+    result = use_preset_schema(
+        preset_name=preset_name,
+        taxonomy_path=taxonomy_path,
+        output_path=output_path,
+        copy=copy,
+        overwrite=overwrite,
+        update_config=True,
+    )
+    if not result.get("success"):
+        _fail(result.get("message", "Preset selection failed."))
+        return False
+
+    _ok(f"Preset '{result['preset_name']}' selected.")
+    if result.get("copied_to"):
+        _ok(f"Copied preset to: {result['copied_to']}")
+    _ok(f"Config updated: {result['config_file']}")
+    print()
+    _info("Restart your MCP server to use the new schema.")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -209,128 +288,80 @@ def run_init(
     taxonomy_path: str | None = None,
     output_path: str | None = None,
     schema_name: str | None = None,
+    preset: str | None = None,
+    list_presets: bool = False,
+    copy_preset: bool = False,
     non_interactive: bool = False,
 ) -> bool:
-    """Run the first-time schema initialisation.
+    """Run the first-time schema initialisation wizard.
 
-    Returns True if a schema was generated and config updated.
+    Returns True if a schema was successfully selected/generated and the
+    config updated.
     """
     print()
     _info("TaskChampion MCP — First-Run Schema Initialisation")
     print()
 
-    # 1. Check if a custom schema is already configured
-    config = _read_config()
-    existing_schema_path = config.get("server", {}).get("schema_path")
-    if existing_schema_path and Path(existing_schema_path).exists():
-        _warn(f"A custom schema is already configured: {existing_schema_path}")
-        if not non_interactive:
-            answer = input("  Overwrite? [y/N]: ").strip().lower()
-            if answer != "y":
-                _info("Keeping existing schema. Nothing to do.")
-                return False
-        else:
-            _info("Non-interactive mode: skipping (schema already configured).")
-            return False
+    # --list-presets short-circuits everything else.
+    if list_presets:
+        return _print_presets()
 
-    # 2. Export existing tasks
-    task_binary = config.get("server", {}).get("task_binary", "task")
-    _info(f"Exporting existing tasks via '{task_binary} export'...")
-    tasks = _export_tasks(task_binary)
+    config = load_config()
 
-    if tasks:
-        _ok(f"Found {len(tasks)} tasks.")
-    else:
-        _warn("No existing tasks found. Schema will be based on taxonomy only.")
-
-    # 3. Find or prompt for taxonomy file
-    resolved_taxonomy: Path | None = None
-
-    if taxonomy_path:
-        resolved_taxonomy = Path(taxonomy_path).resolve()
-        if not resolved_taxonomy.exists():
-            _fail(f"Taxonomy file not found: {resolved_taxonomy}")
-            return False
-    else:
-        detected = _find_taxonomy(project_dir)
-        if detected:
-            _ok(f"Detected taxonomy file: {detected}")
-            if not non_interactive:
-                answer = input("  Use this file? [Y/n]: ").strip().lower()
-                if answer == "n":
-                    alt = input("  Enter path to taxonomy file (or Enter to skip): ").strip()
-                    if alt:
-                        resolved_taxonomy = Path(alt).resolve()
-                        if not resolved_taxonomy.exists():
-                            _warn(f"File not found: {resolved_taxonomy}. Skipping taxonomy.")
-                            resolved_taxonomy = None
-                    else:
-                        resolved_taxonomy = None
-                else:
-                    resolved_taxonomy = detected
-            else:
-                resolved_taxonomy = detected
-        else:
-            _warn("No taxonomy file detected.")
-            if not non_interactive:
-                alt = input("  Enter path to taxonomy file (or Enter to skip): ").strip()
-                if alt:
-                    resolved_taxonomy = Path(alt).resolve()
-                    if not resolved_taxonomy.exists():
-                        _warn(f"File not found: {resolved_taxonomy}. Skipping taxonomy.")
-                        resolved_taxonomy = None
-
-    if resolved_taxonomy:
-        _info(f"Using taxonomy: {resolved_taxonomy}")
-    else:
-        _info("Proceeding without taxonomy file.")
-
-    if not tasks and not resolved_taxonomy:
-        _warn("No tasks and no taxonomy file. Cannot generate a schema.")
-        _info('Configure a preset schema in config.toml instead (e.g. schema = "minimal").')
-        return False
-
-    # 4. Generate schema
-    name = schema_name or "auto_generated"
-    _info("Generating schema...")
-    toml_content = generate_schema_from_tasks_and_taxonomy(
-        tasks=tasks,
-        taxonomy_path=str(resolved_taxonomy) if resolved_taxonomy else None,
-        name=name,
-        description=f"Auto-generated from {len(tasks)} tasks"
-        + (f" + {resolved_taxonomy.name}" if resolved_taxonomy else ""),
+    # Read-only status snapshot via the shared API.
+    task_cli = TaskwarriorCLI(
+        binary=config.task_binary,
+        override_rc=config.taskwarrior_override_rc,
+    )
+    status = get_initialisation_status(
+        config=config,
+        task_cli=task_cli,
+        project_dir=project_dir,
     )
 
-    # 5. Save schema
-    out = Path(output_path) if output_path else _DEFAULT_SCHEMA_OUT
-    if out.exists():
-        if not non_interactive:
-            answer = input(f"  Schema file exists: {out}\n  Overwrite? [y/N]: ").strip().lower()
-            if answer != "y":
-                _info("Aborted. Existing schema kept.")
-                return False
-        # Remove so save_generated_schema doesn't error
-        out.unlink()
+    if not status["needs_onboarding"]:
+        _warn(
+            "A custom schema or taxonomy is already configured: "
+            f"{status.get('custom_schema_path') or status.get('taxonomy_path')}"
+        )
+        if non_interactive:
+            _info("Non-interactive mode: skipping (already initialised).")
+            return False
+        if not _confirm("Overwrite?", default_yes=False):
+            _info("Keeping existing configuration. Nothing to do.")
+            return False
 
-    save_generated_schema(toml_content, out)
-    _ok(f"Schema saved to: {out}")
+    # Explicit preset selection wins.
+    if preset is not None:
+        return _run_preset_branch(
+            preset_name=preset,
+            taxonomy_path=taxonomy_path,
+            copy=copy_preset,
+            output_path=output_path,
+            non_interactive=non_interactive,
+        )
 
-    # 6. Update config.toml
-    update = {"server": {"schema_path": str(out)}}
-    if resolved_taxonomy:
-        update["server"]["taxonomy_path"] = str(resolved_taxonomy)
-    _write_config(update)
-    _ok(f"Config updated: {_CONFIG_FILE}")
+    # Otherwise, generate from tasks/taxonomy (matching the legacy behaviour).
+    return _run_generate_branch(
+        task_cli=task_cli,
+        project_dir=project_dir,
+        taxonomy_path=taxonomy_path,
+        output_path=output_path,
+        schema_name=schema_name,
+        non_interactive=non_interactive,
+    )
 
-    # 7. Summary
-    print()
-    _ok("Initialisation complete!")
-    print(f"  Schema:   {out}")
-    if resolved_taxonomy:
-        print(f"  Taxonomy: {resolved_taxonomy}")
-    print(f"  Config:   {_CONFIG_FILE}")
-    print()
-    _info("Restart your MCP server to use the new schema.")
+
+def _print_presets() -> bool:
+    listing = list_preset_schemas()
+    presets = listing.get("presets") or []
+    if not presets:
+        _warn("No bundled preset schemas found.")
+        return False
+    _info(f"Bundled schemas in {listing.get('schema_dir')}:")
+    for item in presets:
+        description = item.get("description") or "(no description)"
+        print(f"    {item['name']:<24} {description}")
     return True
 
 
@@ -339,7 +370,7 @@ def run_init(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def _build_parser() -> Any:
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -358,25 +389,50 @@ def main() -> None:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output path for the generated schema TOML",
+        help="Output path for the generated schema TOML (or preset copy target)",
     )
     parser.add_argument(
         "--name",
         default=None,
-        help="Schema name (default: auto_generated)",
+        help="Schema name (default: source-aware, e.g. auto_generated_from_taxonomy)",
+    )
+    parser.add_argument(
+        "--preset",
+        default=None,
+        help="Name of a bundled preset schema to install (e.g. minimal, gtd, kanban, scrum)",
+    )
+    parser.add_argument(
+        "--list-presets",
+        action="store_true",
+        help="List bundled preset schemas and exit",
+    )
+    parser.add_argument(
+        "--copy-preset",
+        action="store_true",
+        help=(
+            "When used with --preset, copy the preset into the user config dir "
+            "and point schema_path at the copy instead of referencing the bundled file."
+        ),
     )
     parser.add_argument(
         "--non-interactive",
         action="store_true",
         help="Run without prompts (use defaults)",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = _build_parser().parse_args()
 
     success = run_init(
         project_dir=args.project_dir,
         taxonomy_path=args.taxonomy,
         output_path=args.output,
         schema_name=args.name,
+        preset=args.preset,
+        list_presets=args.list_presets,
+        copy_preset=args.copy_preset,
         non_interactive=args.non_interactive,
     )
     sys.exit(0 if success else 1)

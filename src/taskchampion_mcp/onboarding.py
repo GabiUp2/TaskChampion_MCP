@@ -4,27 +4,47 @@
 
 """Runtime first-run onboarding for TaskChampion MCP.
 
-The CLI wizard in :mod:`taskchampion_mcp.init_schema` is useful for humans
-running ``./dev.sh init``.  This module provides the same idea as safe,
-read-first runtime operations that can be exposed as MCP tools:
+This module is the **single source of truth** for first-run logic.  Both
+surfaces — the CLI wizard (``taskchampion_mcp.init_schema``) and the runtime
+MCP tools registered in :mod:`taskchampion_mcp.server` — call into the
+functions defined here.  The CLI is a thin interactive layer; the MCP tools
+are thin JSON adapters.
 
-1. detect whether the server has a user-specific schema/taxonomy;
-2. offer sensible onboarding options to the model/user;
-3. analyse existing Taskwarrior tasks and/or a taxonomy Markdown file;
-4. generate a reviewable schema preview;
-5. save the approved schema and wire it into ``config.toml``.
+Design constraints:
 
-The important design constraint: analysis and preview tools do not mutate
-anything.  Only ``save_initial_schema`` writes files, and it is explicit.
+1. Analysis and preview functions never mutate filesystem state.
+2. The only functions that write to disk are :func:`save_initial_schema` and
+   :func:`use_preset_schema`; both are explicit, idempotency-aware, and
+   refuse to overwrite without ``overwrite=True``.
+3. Default schema names are source-aware so that the resulting TOML
+   immediately tells the operator where the schema came from
+   (``auto_generated_from_taxonomy``, ``auto_generated_from_tasks``,
+   ``auto_generated_from_taxonomy_and_tasks``, or ``preset_<name>``).
+4. There is exactly one implementation of taxonomy detection and exactly
+   one implementation of ``config.toml`` upsert.  Both are exported so the
+   CLI wizard can reuse them.
+
+Onboarding flow (user-facing summary):
+
+1. :func:`get_initialisation_status` — read-only status.
+2. :func:`propose_initialisation_options` — present choices to the user.
+3. Branch on the chosen option:
+   - ``use_taxonomy`` / ``infer_from_tasks`` / ``hybrid_taxonomy_plus_tasks``:
+     call :func:`generate_schema_preview`, review the TOML, then call
+     :func:`save_initial_schema`.
+   - ``use_builtin_preset``: call :func:`list_preset_schemas`, pick one,
+     then call :func:`use_preset_schema`.
 """
 
 from __future__ import annotations
 
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
-from taskchampion_mcp.config import ServerConfig, default_config_path
+from taskchampion_mcp.config import ServerConfig, default_config_path, default_schema_dir
 from taskchampion_mcp.schema_gen import (
     TaxonomyInfo,
     analyze_tasks,
@@ -33,7 +53,11 @@ from taskchampion_mcp.schema_gen import (
     save_generated_schema,
 )
 
-_DEFAULT_SCHEMA_NAME = "auto_generated"
+# ---------------------------------------------------------------------------
+# Constants and small helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_SCHEMA_NAME_GENERIC = "auto_generated"
 _DEFAULT_SCHEMA_FILE = "generated_schema.toml"
 
 
@@ -43,6 +67,28 @@ def _config_dir() -> Path:
 
 def _default_schema_path() -> Path:
     return _config_dir() / _DEFAULT_SCHEMA_FILE
+
+
+def default_schema_name_for_source(
+    has_taxonomy: bool,
+    has_tasks: bool,
+) -> str:
+    """Return a source-aware default schema name.
+
+    Centralised so the CLI wizard and the runtime preview tool agree.
+    """
+    if has_taxonomy and has_tasks:
+        return "auto_generated_from_taxonomy_and_tasks"
+    if has_taxonomy:
+        return "auto_generated_from_taxonomy"
+    if has_tasks:
+        return "auto_generated_from_tasks"
+    return _DEFAULT_SCHEMA_NAME_GENERIC
+
+
+# ---------------------------------------------------------------------------
+# Taxonomy detection / resolution (single implementation)
+# ---------------------------------------------------------------------------
 
 
 def _candidate_taxonomy_paths(project_dir: str | None = None) -> list[Path]:
@@ -102,6 +148,11 @@ def resolve_taxonomy_path(
     return Path(detected[0]) if detected else None
 
 
+# ---------------------------------------------------------------------------
+# Task export wrappers
+# ---------------------------------------------------------------------------
+
+
 def _safe_export_tasks(task_cli: TaskwarriorCLI) -> tuple[list[dict[str, Any]], str | None]:
     try:
         return task_cli.export_tasks(), None
@@ -112,6 +163,11 @@ def _safe_export_tasks(task_cli: TaskwarriorCLI) -> tuple[list[dict[str, Any]], 
 def _safe_task_count(task_cli: TaskwarriorCLI) -> tuple[int, str | None]:
     tasks, error = _safe_export_tasks(task_cli)
     return len(tasks), error
+
+
+# ---------------------------------------------------------------------------
+# Status / options
+# ---------------------------------------------------------------------------
 
 
 def get_initialisation_status(
@@ -168,13 +224,17 @@ def get_initialisation_status(
         "task_count": task_count,
         "timewarrior_available": bool(timew_cli and timew_cli.available()),
         "safe_to_mutate_tasks": False,
+        "available_presets": [preset["name"] for preset in _list_presets_raw()],
         "message_for_model": _status_message(needs_onboarding, task_count, taxonomy_available),
     }
 
 
 def _status_message(needs_onboarding: bool, task_count: int, taxonomy_available: bool) -> str:
     if not needs_onboarding:
-        return "User-specific task semantics are configured. Read schema/taxonomy before modifying tasks."
+        return (
+            "User-specific task semantics are configured. "
+            "Read schema/taxonomy before modifying tasks."
+        )
     if taxonomy_available:
         return (
             "No active custom schema is configured, but a taxonomy file is available. "
@@ -183,18 +243,23 @@ def _status_message(needs_onboarding: bool, task_count: int, taxonomy_available:
     if task_count > 0:
         return (
             "No taxonomy/schema is configured. Ask the user for a taxonomy file, "
-            "or offer to infer a draft schema from existing tasks for review."
+            "offer to infer a draft schema from existing tasks, or select a bundled preset."
         )
     return (
         "No taxonomy/schema and no existing tasks are available. Ask the user to provide "
-        "a taxonomy file or select a bundled preset."
+        "a taxonomy file or select a bundled preset via use_preset_schema."
     )
 
 
 def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
-    """Build user-facing onboarding options from ``get_initialisation_status``."""
+    """Build user-facing onboarding options from ``get_initialisation_status``.
+
+    Each option is self-describing so the calling LLM can present a clean
+    menu to the user without further introspection.
+    """
     task_count = int(status.get("task_count") or 0)
     has_taxonomy = bool(status.get("taxonomy_exists") or status.get("detected_taxonomy_paths"))
+    preset_names = status.get("available_presets") or [p["name"] for p in _list_presets_raw()]
 
     return {
         "needs_onboarding": bool(status.get("needs_onboarding")),
@@ -205,6 +270,11 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "label": "Use a taxonomy Markdown file",
                 "recommended": has_taxonomy,
                 "requires_user_input": not has_taxonomy,
+                "next_tools": [
+                    "analyse_taxonomy_file",
+                    "generate_initial_schema_preview",
+                    "save_initial_schema",
+                ],
                 "description": (
                     "Best option when the user has documented field meanings, lifecycle phases, "
                     "conditional requirements, project naming, and task flow."
@@ -215,9 +285,15 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "label": "Infer a draft schema from existing tasks",
                 "recommended": not has_taxonomy and task_count > 0,
                 "requires_user_input": False,
+                "next_tools": [
+                    "analyse_existing_tasks_for_schema",
+                    "generate_initial_schema_preview",
+                    "save_initial_schema",
+                ],
                 "description": (
-                    "Useful fallback when no taxonomy exists. It detects fields, value distributions, "
-                    "likely enums, and likely required fields, but the result must be reviewed."
+                    "Useful fallback when no taxonomy exists. It detects fields, "
+                    "value distributions, likely enums, and likely required fields, "
+                    "but the result must be reviewed."
                 ),
             },
             {
@@ -225,8 +301,15 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "label": "Use taxonomy plus existing tasks",
                 "recommended": has_taxonomy and task_count > 0,
                 "requires_user_input": False,
+                "next_tools": [
+                    "analyse_taxonomy_file",
+                    "analyse_existing_tasks_for_schema",
+                    "generate_initial_schema_preview",
+                    "save_initial_schema",
+                ],
                 "description": (
-                    "Strongest option: taxonomy supplies semantics, existing tasks supply empirical checks."
+                    "Strongest option: taxonomy supplies semantics, "
+                    "existing tasks supply empirical checks."
                 ),
             },
             {
@@ -234,10 +317,21 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "label": "Use a bundled preset schema",
                 "recommended": not has_taxonomy and task_count == 0,
                 "requires_user_input": True,
-                "description": "Lowest-friction fallback: minimal, GTD, scrum, kanban, or example schema.",
+                "next_tools": ["list_preset_schemas", "use_preset_schema"],
+                "available_presets": preset_names,
+                "description": (
+                    "Lowest-friction fallback. Available presets: "
+                    + ", ".join(preset_names)
+                    + ". Pick one and call use_preset_schema."
+                ),
             },
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Analysis
+# ---------------------------------------------------------------------------
 
 
 def analyse_existing_tasks(task_cli: TaskwarriorCLI) -> dict[str, Any]:
@@ -319,14 +413,66 @@ def _taxonomy_summary(taxonomy: TaxonomyInfo, taxonomy_path: Path) -> dict[str, 
     }
 
 
+# ---------------------------------------------------------------------------
+# Preview + save (generated schema path)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SchemaPreview:
+    """Internal struct used by the CLI wrapper to avoid re-parsing the dict."""
+
+    schema_toml: str
+    schema_name: str
+    task_count: int
+    resolved_taxonomy: Path | None
+
+
+def _build_preview_payload(
+    *,
+    schema_toml: str,
+    schema_name: str,
+    tasks: list[dict[str, Any]],
+    task_error: str | None,
+    resolved_taxonomy: Path | None,
+) -> dict[str, Any]:
+    analysis = analyze_tasks(tasks) if tasks else None
+    taxonomy = parse_taxonomy(resolved_taxonomy) if resolved_taxonomy else None
+
+    return {
+        "success": True,
+        "mutated": False,
+        "schema_name": schema_name,
+        "task_count": len(tasks),
+        "task_export_error": task_error,
+        "taxonomy_path": str(resolved_taxonomy) if resolved_taxonomy else None,
+        "summary": {
+            "fields_from_tasks": sorted(analysis.fields.keys()) if analysis else [],
+            "uda_fields_from_tasks": sorted(analysis.uda_fields().keys()) if analysis else [],
+            "fields_from_taxonomy": sorted(taxonomy.fields.keys()) if taxonomy else [],
+            "conditions_from_taxonomy": len(taxonomy.conditions) if taxonomy else 0,
+            "phase_transitions_from_taxonomy": len(taxonomy.phase_transitions) if taxonomy else 0,
+        },
+        "schema_toml": schema_toml,
+        "review_note": (
+            "Review schema_toml before saving. Inferred enum/required fields are heuristics; "
+            "taxonomy descriptions are treated as higher authority than raw task data."
+        ),
+    }
+
+
 def generate_schema_preview(
     config: ServerConfig,
     task_cli: TaskwarriorCLI,
     taxonomy_path: str | None = None,
     project_dir: str | None = None,
-    schema_name: str = _DEFAULT_SCHEMA_NAME,
+    schema_name: str | None = None,
 ) -> dict[str, Any]:
-    """Generate a non-mutating schema preview from tasks, taxonomy, or both."""
+    """Generate a non-mutating schema preview from tasks, taxonomy, or both.
+
+    If ``schema_name`` is empty/None, a source-aware default is chosen via
+    :func:`default_schema_name_for_source`.
+    """
     tasks, task_error = _safe_export_tasks(task_cli)
     resolved_taxonomy = resolve_taxonomy_path(config, taxonomy_path, project_dir)
 
@@ -340,6 +486,15 @@ def generate_schema_preview(
             "task_export_error": task_error,
         }
 
+    effective_name = (
+        schema_name
+        if schema_name
+        else default_schema_name_for_source(
+            has_taxonomy=resolved_taxonomy is not None,
+            has_tasks=bool(tasks),
+        )
+    )
+
     description = f"Auto-generated from {len(tasks)} tasks"
     if resolved_taxonomy:
         description += f" + {resolved_taxonomy.name}"
@@ -347,33 +502,17 @@ def generate_schema_preview(
     toml_content = generate_schema_from_tasks_and_taxonomy(
         tasks=tasks,
         taxonomy_path=str(resolved_taxonomy) if resolved_taxonomy else None,
-        name=schema_name or _DEFAULT_SCHEMA_NAME,
+        name=effective_name,
         description=description,
     )
 
-    analysis = analyze_tasks(tasks) if tasks else None
-    taxonomy = parse_taxonomy(resolved_taxonomy) if resolved_taxonomy else None
-
-    return {
-        "success": True,
-        "mutated": False,
-        "schema_name": schema_name or _DEFAULT_SCHEMA_NAME,
-        "task_count": len(tasks),
-        "task_export_error": task_error,
-        "taxonomy_path": str(resolved_taxonomy) if resolved_taxonomy else None,
-        "summary": {
-            "fields_from_tasks": sorted(analysis.fields.keys()) if analysis else [],
-            "uda_fields_from_tasks": sorted(analysis.uda_fields().keys()) if analysis else [],
-            "fields_from_taxonomy": sorted(taxonomy.fields.keys()) if taxonomy else [],
-            "conditions_from_taxonomy": len(taxonomy.conditions) if taxonomy else 0,
-            "phase_transitions_from_taxonomy": len(taxonomy.phase_transitions) if taxonomy else 0,
-        },
-        "schema_toml": toml_content,
-        "review_note": (
-            "Review schema_toml before saving. Inferred enum/required fields are heuristics; "
-            "taxonomy descriptions are treated as higher authority than raw task data."
-        ),
-    }
+    return _build_preview_payload(
+        schema_toml=toml_content,
+        schema_name=effective_name,
+        tasks=tasks,
+        task_error=task_error,
+        resolved_taxonomy=resolved_taxonomy,
+    )
 
 
 def save_initial_schema(
@@ -383,7 +522,7 @@ def save_initial_schema(
     overwrite: bool = False,
     update_config: bool = True,
 ) -> dict[str, Any]:
-    """Persist an approved generated schema and optionally update config.toml."""
+    """Persist an approved generated schema and optionally update ``config.toml``."""
     if not schema_toml.strip():
         return {
             "error": True,
@@ -403,7 +542,7 @@ def save_initial_schema(
 
     cfg_path: Path | None = None
     if update_config:
-        cfg_path = _upsert_server_config(
+        cfg_path = upsert_server_config(
             schema_path=str(saved_path),
             taxonomy_path=str(Path(taxonomy_path).expanduser().resolve())
             if taxonomy_path
@@ -419,8 +558,176 @@ def save_initial_schema(
     }
 
 
-def _upsert_server_config(schema_path: str, taxonomy_path: str | None = None) -> Path:
-    """Insert/update schema_path and taxonomy_path in the user config file."""
+# ---------------------------------------------------------------------------
+# Bundled preset support
+# ---------------------------------------------------------------------------
+
+
+def _list_presets_raw() -> list[dict[str, str]]:
+    """Return raw preset metadata (name + absolute path).
+
+    Used internally so the slightly more decorated public functions can build
+    on a single source of truth.  Returns [] if the bundled directory is
+    missing (e.g. unusual install layout) rather than raising.
+    """
+    schema_dir = default_schema_dir()
+    if not schema_dir.exists():
+        return []
+
+    presets: list[dict[str, str]] = []
+    for path in sorted(schema_dir.glob("*.toml")):
+        presets.append({"name": path.stem, "path": str(path.resolve())})
+    return presets
+
+
+def list_preset_schemas() -> dict[str, Any]:
+    """List bundled preset schemas with a short description for each.
+
+    Reads the ``[meta]`` block of each preset so the description shown to the
+    user is taken directly from the schema file rather than duplicated here.
+    """
+    raw_presets = _list_presets_raw()
+    presets: list[dict[str, Any]] = []
+
+    for preset in raw_presets:
+        meta = _read_preset_meta(Path(preset["path"]))
+        presets.append(
+            {
+                "name": preset["name"],
+                "path": preset["path"],
+                "description": meta.get("description", ""),
+                "version": meta.get("version", ""),
+                "schema_name": meta.get("name", preset["name"]),
+            }
+        )
+
+    return {
+        "success": True,
+        "schema_dir": str(default_schema_dir()),
+        "preset_count": len(presets),
+        "presets": presets,
+    }
+
+
+def _read_preset_meta(path: Path) -> dict[str, str]:
+    """Parse only the ``[meta]`` table of a preset schema.
+
+    Tolerant: returns an empty dict on any parse error so listing never
+    fails because one file is malformed.
+    """
+    try:
+        import sys
+
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib  # type: ignore[no-redef]
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        meta = data.get("meta", {})
+        return {k: str(v) for k, v in meta.items() if isinstance(v, (str, int, float))}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def use_preset_schema(
+    preset_name: str,
+    taxonomy_path: str | None = None,
+    output_path: str | None = None,
+    copy: bool = False,
+    overwrite: bool = False,
+    update_config: bool = True,
+) -> dict[str, Any]:
+    """Wire a bundled preset into the user's ``config.toml``.
+
+    By default this writes ``[server].schema = <preset_name>`` and clears any
+    previous ``schema_path`` override.  This is the simplest, most stable
+    integration: the user keeps using the bundled, version-controlled preset
+    file.
+
+    Set ``copy=True`` to instead copy the preset into ``output_path`` (or the
+    default user config dir) and point ``schema_path`` at the copy.  Use this
+    when the user wants a personal copy they can edit without touching the
+    package install.
+
+    Refuses to overwrite an existing target file when ``copy=True`` unless
+    ``overwrite=True``.
+    """
+    raw_presets = _list_presets_raw()
+    by_name = {p["name"]: p for p in raw_presets}
+    if preset_name not in by_name:
+        return {
+            "error": True,
+            "message": (
+                f"Unknown preset '{preset_name}'. Available: " + ", ".join(sorted(by_name.keys()))
+            ),
+            "available_presets": sorted(by_name.keys()),
+        }
+
+    preset_path = Path(by_name[preset_name]["path"])
+
+    saved_path: Path | None = None
+    if copy:
+        target = Path(output_path).expanduser() if output_path else _config_dir() / preset_path.name
+        if target.exists() and not overwrite:
+            return {
+                "error": True,
+                "message": (
+                    f"Target file already exists: {target}. Pass overwrite=true to replace it."
+                ),
+            }
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(preset_path, target)
+        saved_path = target.resolve()
+
+    cfg_path: Path | None = None
+    if update_config:
+        cfg_path = upsert_server_config(
+            schema_path=str(saved_path) if saved_path else None,
+            schema_name=preset_name if not saved_path else None,
+            taxonomy_path=str(Path(taxonomy_path).expanduser().resolve())
+            if taxonomy_path
+            else None,
+            clear_schema_path=not saved_path,
+        )
+
+    return {
+        "success": True,
+        "preset_name": preset_name,
+        "preset_path": str(preset_path.resolve()),
+        "copied_to": str(saved_path) if saved_path else None,
+        "config_updated": update_config,
+        "config_file": str(cfg_path) if cfg_path else None,
+        "message": (f"Preset '{preset_name}' selected. Restart the MCP server to load it."),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Config upsert (single implementation, reused by CLI and MCP)
+# ---------------------------------------------------------------------------
+
+
+def upsert_server_config(
+    schema_path: str | None = None,
+    schema_name: str | None = None,
+    taxonomy_path: str | None = None,
+    clear_schema_path: bool = False,
+) -> Path:
+    """Insert/update ``[server]`` keys in the user config file.
+
+    Behaviour:
+
+    - ``schema_path``:  if provided, set ``schema_path = "<value>"``.
+    - ``schema_name``:  if provided, set ``schema = "<value>"`` (preset selection).
+    - ``taxonomy_path``: if provided, set ``taxonomy_path = "<value>"``.
+    - ``clear_schema_path``: if True, comment out an existing ``schema_path``
+      line.  Useful when switching from a generated schema back to a named
+      preset.
+
+    The function preserves comments and ordering as much as possible by
+    operating on raw lines rather than re-emitting parsed TOML.  This is the
+    single implementation; the CLI wizard calls into it.
+    """
     cfg_path = default_config_path()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -428,14 +735,18 @@ def _upsert_server_config(schema_path: str, taxonomy_path: str | None = None) ->
     new_lines: list[str] = []
     in_server = False
     saw_server = False
-    wrote_schema = False
+    wrote_schema_path = False
+    wrote_schema_name = False
     wrote_taxonomy = False
 
     def append_missing_server_keys() -> None:
-        nonlocal wrote_schema, wrote_taxonomy
-        if not wrote_schema:
+        nonlocal wrote_schema_path, wrote_schema_name, wrote_taxonomy
+        if schema_path and not wrote_schema_path:
             new_lines.append(f'schema_path = "{schema_path}"')
-            wrote_schema = True
+            wrote_schema_path = True
+        if schema_name and not wrote_schema_name:
+            new_lines.append(f'schema = "{schema_name}"')
+            wrote_schema_name = True
         if taxonomy_path and not wrote_taxonomy:
             new_lines.append(f'taxonomy_path = "{taxonomy_path}"')
             wrote_taxonomy = True
@@ -456,17 +767,39 @@ def _upsert_server_config(schema_path: str, taxonomy_path: str | None = None) ->
             continue
 
         if in_server and stripped.startswith("schema_path"):
-            new_lines.append(f'schema_path = "{schema_path}"')
-            wrote_schema = True
+            if schema_path:
+                new_lines.append(f'schema_path = "{schema_path}"')
+                wrote_schema_path = True
+                continue
+            if clear_schema_path:
+                new_lines.append(f"# {stripped}  # cleared by preset selection")
+                continue
+            # leave untouched
+            new_lines.append(line)
             continue
 
-        if in_server and taxonomy_path and stripped.startswith("taxonomy_path"):
-            new_lines.append(f'taxonomy_path = "{taxonomy_path}"')
-            wrote_taxonomy = True
+        if (
+            in_server
+            and stripped.startswith("schema ")
+            or (in_server and stripped.startswith("schema="))
+        ):
+            if schema_name:
+                new_lines.append(f'schema = "{schema_name}"')
+                wrote_schema_name = True
+                continue
+            if schema_path:
+                # generated schema overrides named schema
+                new_lines.append(f"# {stripped}  # overridden by schema_path")
+                continue
+            new_lines.append(line)
             continue
 
-        if in_server and stripped.startswith("schema "):
-            new_lines.append(f"# {stripped}  # overridden by schema_path")
+        if in_server and stripped.startswith("taxonomy_path"):
+            if taxonomy_path:
+                new_lines.append(f'taxonomy_path = "{taxonomy_path}"')
+                wrote_taxonomy = True
+                continue
+            new_lines.append(line)
             continue
 
         new_lines.append(line)
@@ -487,10 +820,14 @@ def _upsert_server_config(schema_path: str, taxonomy_path: str | None = None) ->
 __all__ = [
     "analyse_existing_tasks",
     "analyse_taxonomy_file",
+    "default_schema_name_for_source",
     "detect_taxonomy_files",
     "generate_schema_preview",
     "get_initialisation_status",
+    "list_preset_schemas",
     "propose_initialisation_options",
     "resolve_taxonomy_path",
     "save_initial_schema",
+    "upsert_server_config",
+    "use_preset_schema",
 ]
