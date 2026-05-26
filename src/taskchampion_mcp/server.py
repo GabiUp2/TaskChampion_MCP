@@ -153,8 +153,9 @@ def create_server(
 # ---------------------------------------------------------------------------
 
 
-def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
-    """Register CONTRIBUTOR-level tools (read + annotate + modify)."""
+
+def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
+    """Register first-run onboarding tools."""
 
     @mcp.tool()
     def get_initialisation_status(project_dir: str = "") -> str:
@@ -292,6 +293,10 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 update_config=update_config,
             )
         )
+
+def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
+    """Register CONTRIBUTOR-level tools (read + annotate + modify)."""
+
 
     @mcp.tool()
     def list_tasks(
