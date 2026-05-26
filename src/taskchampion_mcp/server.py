@@ -86,6 +86,13 @@ def create_server(
     else:
         logger.info("Timewarrior not found. Time tracking tools disabled.")
 
+    # --- Init required ------------------------------------------------------
+    def requires_onboarding(config: ServerConfig) -> bool:
+        return not (
+            config.explicit_role_configured
+            and config.explicit_schema_configured
+        )
+
     # --- Load schema --------------------------------------------------------
     schema: TaskSchema
     if config.schema_path:
@@ -120,13 +127,16 @@ def create_server(
     )
 
     # --- Register tools by role level ---------------------------------------
-    _register_contributor_tools(mcp, registry)
+    if requires_onboarding(config):
+        _register_onboarding_tools(mcp, registry)
+    else:
+        _register_contributor_tools(mcp, registry)
 
-    if Role.has_permission(config.role, Role.GENERATOR):
-        _register_generator_tools(mcp, registry)
+        if Role.has_permission(config.role, Role.GENERATOR):
+            _register_generator_tools(mcp, registry)
 
-    if Role.has_permission(config.role, Role.MANAGER):
-        _register_manager_tools(mcp, registry)
+        if Role.has_permission(config.role, Role.MANAGER):
+            _register_manager_tools(mcp, registry)
 
     logger.info(
         "Server ready. Role=%s, Schema=%s, TW=%s",

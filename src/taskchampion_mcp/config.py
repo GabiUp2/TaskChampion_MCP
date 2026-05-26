@@ -58,14 +58,22 @@ class ServerConfig:
     schema_path: str | None = None
     task_binary: str = "task"
     timew_binary: str = "timew"
+
+    # Configuration file status
+    config_file_exists: bool = False
+    explicit_role_configured: bool = False
+    explicit_schema_configured:bool = False
+    explicit_taxonomy_configured: bool = False
+    redacted_fields: list[str] = field(default_factory=list)
+    taxonomy_path: str | None = None
+
+    # Security settings
     rate_limit_per_minute: int = 30
     rate_limit_per_hour: int = 200
     create_limit_per_hour: int = 50
     require_confirmation: bool = True
     dry_run_default: bool = False
     audit_log_path: str = ""
-    redacted_fields: list[str] = field(default_factory=list)
-    taxonomy_path: str | None = None
     taskwarrior_override_rc: str | None = None
 
 
@@ -126,9 +134,14 @@ def load_config(path: Path | None = None) -> ServerConfig:
         cfg.schema_path = server.get("schema_path", cfg.schema_path)
         cfg.task_binary = server.get("task_binary", cfg.task_binary)
         cfg.timew_binary = server.get("timew_binary", cfg.timew_binary)
-        cfg.taxonomy_path = server.get("taxonomy_path", cfg.taxonomy_path)
-        cfg.taskwarrior_override_rc = server.get("taskrc", cfg.taskwarrior_override_rc)
 
+        # Initialisation flags
+        cfg.explicit_role_configured = "role" in server
+        cfg.explicit_schema_configured = "schema" in server or "schema_path" in server
+        cfg.explicit_taxonomy_configured = "taxonomy_path" in server
+        cfg.taxonomy_path = server.get("taxonomy_path", cfg.taxonomy_path)
+
+        # Security settings
         security = data.get("security", {})
         cfg.rate_limit_per_minute = security.get("rate_limit_per_minute", cfg.rate_limit_per_minute)
         cfg.rate_limit_per_hour = security.get("rate_limit_per_hour", cfg.rate_limit_per_hour)
@@ -136,7 +149,9 @@ def load_config(path: Path | None = None) -> ServerConfig:
         cfg.require_confirmation = security.get("require_confirmation", cfg.require_confirmation)
         cfg.dry_run_default = security.get("dry_run_default", cfg.dry_run_default)
         cfg.redacted_fields = security.get("redacted_fields", cfg.redacted_fields)
+        cfg.taskwarrior_override_rc = server.get("taskrc", cfg.taskwarrior_override_rc)
 
+        # Logging settings
         logging_section = data.get("logging", {})
         cfg.audit_log_path = logging_section.get("audit_log", cfg.audit_log_path)
 
