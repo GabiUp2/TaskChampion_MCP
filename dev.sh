@@ -9,8 +9,9 @@
 # Actions:
 #   setup       — Install Python deps (uv), create venv, install dev dependencies
 #   check       — Verify all required tools are installed and report versions
-#   install     — Add taskchampion MCP entry to IDE config (windsurf/cursor/vscode/claude)
+#   install     — Add taskchampion MCP entry to IDE config (windsurf/cursor/vscode/claude) [-r|--restart to restart IDE]
 #   uninstall   — Remove taskchampion MCP entry from IDE config (windsurf/cursor/vscode/claude)
+#   reinstall   — Reinstall taskchampion MCP entry (gracefully terminates IDE, then uninstall + install) [-r|--restart to restart IDE]
 #   init        — First-run schema wizard: analyse tasks + taxonomy, generate schema
 #   test        — Run the test suite
 #   lint        — Run ruff linter
@@ -42,6 +43,51 @@ fail()  { echo -e "${RED}[FAIL]${NC}  $*"; }
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_ide_terminate_gracefully() {
+    # Gracefully terminate an IDE process if running
+    local ide_name="$1"
+    local process_name="$2"
+    
+    # Use case-insensitive full command line match for process detection
+    if pgrep -fi "$process_name" &>/dev/null; then
+        info "Gracefully terminating $ide_name..."
+        # Try SIGTERM first (graceful shutdown)
+        pkill -TERM -fi "$process_name" &>/dev/null || true
+        
+        # Wait up to 5 seconds for graceful shutdown
+        local count=0
+        while pgrep -fi "$process_name" &>/dev/null && [ $count -lt 5 ]; do
+            sleep 1
+            count=$((count + 1))
+        done
+        
+        # If still running, force kill
+        if pgrep -fi "$process_name" &>/dev/null; then
+            warn "$ide_name did not shut down gracefully, force killing..."
+            pkill -9 -fi "$process_name" &>/dev/null || true
+            sleep 1
+        fi
+        
+        ok "$ide_name terminated."
+    else
+        info "$ide_name is not running."
+    fi
+}
+
+_ide_start() {
+    # Start an IDE if it's available
+    local ide_name="$1"
+    local start_command="$2"
+    
+    if command -v "$start_command" &>/dev/null; then
+        info "Starting $ide_name..."
+        "$start_command" &>/dev/null &
+        ok "$ide_name started."
+    else
+        warn "$start_command not found. Please start $ide_name manually."
+    fi
+}
 
 _check_cmd() {
     local cmd="$1"
@@ -301,8 +347,45 @@ action_install() {
         [vscode]="VS Code"
         [claude]="Claude Desktop"
     )
+    # IDE process names for graceful termination (use partial match patterns)
+    local -A ide_processes=(
+        [windsurf]="windsurf"
+        [cursor]="cursor"
+        [vscode]="code"
+        [claude]="claude"
+    )
+    # IDE start commands
+    local -A ide_start_commands=(
+        [windsurf]="windsurf"
+        [cursor]="cursor"
+        [vscode]="code"
+        [claude]="claude"
+    )
 
     local target="${1:-}"
+    local restart_after=false
+
+    # Parse arguments for -r or --restart flag
+    shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -r|--restart)
+                restart_after=true
+                shift
+                ;;
+            *)
+                # Unknown argument, might be the IDE target if target was empty
+                if [ -z "$target" ]; then
+                    target="$1"
+                    shift
+                else
+                    fail "Unknown argument: $1"
+                    echo "  Usage: ./dev.sh install <ide> [-r|--restart]"
+                    exit 1
+                fi
+                ;;
+        esac
+    done
 
     if [ -n "$target" ]; then
         target="$(echo "$target" | tr '[:upper:]' '[:lower:]')"
@@ -313,6 +396,9 @@ action_install() {
         fi
         local cfg_path="${ide_configs[$target]}"
         local cfg_name="${ide_labels[$target]}"
+        local process_name="${ide_processes[$target]:-$target}"
+        local start_command="${ide_start_commands[$target]:-$target}"
+
         info "Installing taskchampion MCP entry into ${cfg_name} config..."
         _upsert_mcp_entry "$cfg_path" "$cfg_name" "$server_command" "$server_args"
         ok "${cfg_name}: taskchampion entry written to ${cfg_path}"
@@ -321,10 +407,20 @@ action_install() {
         echo "  command: ${server_command}"
         echo "  args:    -m taskchampion_mcp.server"
         echo ""
-        info "Next steps:"
-        echo "  1. Restart your IDE to pick up the new MCP server"
-        echo "  2. Ask the LLM to help you configure your role level and schema/taxonomy"
-        echo "     Example: 'Help me set up my TaskChampion role and task schema'"
+
+        if [ "$restart_after" = true ]; then
+            info "Restarting ${cfg_name}..."
+            _ide_terminate_gracefully "$cfg_name" "$process_name"
+            sleep 1
+            _ide_start "$cfg_name" "$start_command"
+            echo ""
+        else
+            info "Next steps:"
+            echo "  1. Restart your IDE to pick up the new MCP server"
+            echo "     Or use: ./dev.sh install ${target} -r"
+            echo "  2. Ask the LLM to help you configure your role level and schema/taxonomy"
+            echo "     Example: 'Help me set up my TaskChampion role and task schema'"
+        fi
         return
     fi
 
@@ -394,10 +490,30 @@ action_install() {
     echo "  command: ${server_command}"
     echo "  args:    -m taskchampion_mcp.server"
     echo ""
-    info "Next steps:"
-    echo "  1. Restart your IDE to pick up the new MCP server"
-    echo "  2. Ask the LLM to help you configure your role level and schema/taxonomy"
-    echo "     Example: 'Help me set up my TaskChampion role and task schema'"
+
+    # Ask if user wants to restart IDEs
+    if [ ${#selected[@]} -eq 1 ]; then
+        local key="${selected[0]}"
+        local cfg_name="${ide_labels[$key]}"
+        local process_name="${ide_processes[$key]:-$key}"
+        local start_command="${ide_start_commands[$key]:-$key}"
+        read -rp "Restart ${cfg_name} now? [y/N]: " restart_answer
+        if [[ "$restart_answer" == "y" || "$restart_answer" == "Y" ]]; then
+            _ide_terminate_gracefully "$cfg_name" "$process_name"
+            sleep 1
+            _ide_start "$cfg_name" "$start_command"
+        else
+            info "Next steps:"
+            echo "  1. Restart your IDE to pick up the new MCP server"
+            echo "  2. Ask the LLM to help you configure your role level and schema/taxonomy"
+            echo "     Example: 'Help me set up my TaskChampion role and task schema'"
+        fi
+    else
+        info "Next steps:"
+        echo "  1. Restart your IDE(s) to pick up the new MCP server"
+        echo "  2. Ask the LLM to help you configure your role level and schema/taxonomy"
+        echo "     Example: 'Help me set up my TaskChampion role and task schema'"
+    fi
     ok "Install complete."
 }
 
@@ -490,6 +606,98 @@ action_uninstall() {
 
     echo ""
     info "Restart your IDE to pick up the changes."
+}
+
+action_reinstall() {
+    # All known IDE MCP config locations
+    local -A ide_configs=(
+        [windsurf]="$HOME/.codeium/windsurf/mcp_config.json"
+        [cursor]="$HOME/.cursor/mcp.json"
+        [vscode]="$HOME/.vscode/mcp.json"
+        [claude]="${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+    )
+    local -A ide_labels=(
+        [windsurf]="Windsurf"
+        [cursor]="Cursor"
+        [vscode]="VS Code"
+        [claude]="Claude Desktop"
+    )
+    # IDE process names for graceful termination (use partial match patterns)
+    local -A ide_processes=(
+        [windsurf]="windsurf"
+        [cursor]="cursor"
+        [vscode]="code"
+        [claude]="claude"
+    )
+    # IDE start commands
+    local -A ide_start_commands=(
+        [windsurf]="windsurf"
+        [cursor]="cursor"
+        [vscode]="code"
+        [claude]="claude"
+    )
+
+    local target="${1:-}"
+    local restart_after=false
+
+    # Parse arguments for -r or --restart flag
+    shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -r|--restart)
+                restart_after=true
+                shift
+                ;;
+            *)
+                fail "Unknown argument: $1"
+                echo "  Usage: ./dev.sh reinstall <ide> [-r|--restart]"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [ -z "$target" ]; then
+        fail "reinstall requires an IDE target"
+        echo "  Usage: ./dev.sh reinstall <ide> [-r|--restart]"
+        echo "  Available: windsurf, cursor, vscode, claude"
+        exit 1
+    fi
+
+    target="$(echo "$target" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "${ide_configs[$target]+x}" ]; then
+        fail "Unknown IDE: $target"
+        echo "  Available: ${!ide_configs[*]}"
+        exit 1
+    fi
+
+    local cfg_name="${ide_labels[$target]}"
+    local process_name="${ide_processes[$target]:-$target}"
+    local start_command="${ide_start_commands[$target]:-$target}"
+
+    info "Reinstalling taskchampion MCP entry for ${cfg_name}..."
+    echo ""
+
+    # Gracefully terminate the IDE if running
+    _ide_terminate_gracefully "$cfg_name" "$process_name"
+    echo ""
+
+    # Uninstall and reinstall
+    action_uninstall "$target"
+    echo ""
+    
+    # Pass restart flag to install if needed
+    if [ "$restart_after" = true ]; then
+        action_install "$target" -r
+    else
+        action_install "$target"
+    fi
+    echo ""
+
+    info "Reinstall complete."
+    if [ "$restart_after" = false ]; then
+        info "You can now start ${cfg_name} again if needed."
+        info "Or use: ./dev.sh reinstall ${target} -r"
+    fi
 }
 
 action_publish() {
@@ -643,7 +851,10 @@ action_help() {
     echo "  setup     Install Python deps, create venv, install dev dependencies"
     echo "  check     Verify all required tools and report versions"
     echo "  install   Add taskchampion MCP entry to IDE config [windsurf|cursor|vscode|claude]"
+    echo "            Use -r or --restart to gracefully restart the IDE after installation"
     echo "  uninstall Remove taskchampion MCP entry from IDE config [windsurf|cursor|vscode|claude]"
+    echo "  reinstall Reinstall taskchampion MCP entry (gracefully terminates IDE, then uninstall + install)"
+    echo "            [windsurf|cursor|vscode|claude] Use -r or --restart to restart the IDE after reinstall"
     echo "  init      First-run schema wizard (analyse tasks + taxonomy, generate schema)"
     echo "  test      Run the test suite (pass extra pytest args after)"
     echo "  lint      Run ruff linter on src/ and tests/"
@@ -665,6 +876,7 @@ case "${1:-help}" in
     check)     action_check ;;
     install)   shift; action_install "$@" ;;
     uninstall) shift; action_uninstall "$@" ;;
+    reinstall) shift; action_reinstall "$@" ;;
     init)      shift; action_init "$@" ;;
     test)      shift; action_test "$@" ;;
     lint)      action_lint ;;

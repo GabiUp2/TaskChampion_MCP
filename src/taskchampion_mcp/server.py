@@ -130,7 +130,7 @@ def create_server(
     )
 
     # --- Register tools by role level ---------------------------------------
-    if onboarding_required(config):
+    if onboarding_required:
         _register_onboarding_tools(mcp, registry)
     else:
         _register_contributor_tools(mcp, registry)
@@ -594,6 +594,13 @@ def _build_instructions(
                 "",
                 "Never silently invent workflow semantics.",
                 "Never save a schema the user has not approved.",
+                "",
+                "MANDATORY UNINITIALISED RESPONSE RULE:",
+                "If onboarding_required is true, every user-facing answer about this server's availability MUST include:",
+                "1. that the server is visible but not initialised;",
+                "2. that fallback role/schema are not user-selected;",
+                "3. a concrete onboarding menu with role and schema-source choices;",
+                "4. a request for the user's first choice.",
             ]
         )
 
