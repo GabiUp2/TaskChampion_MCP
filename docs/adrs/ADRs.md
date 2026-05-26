@@ -877,3 +877,132 @@ This is the diagnostic tool of first resort when a user reports "I changed the c
 - Five layers is more surface than one — onboarding doc must explain it
 - Env var naming convention adds a translation step (`TC_MCP_RATE_LIMIT_PER_MINUTE` ↔ `[security] rate_limit_per_minute`)
 - CLI flag implementation requires wiring through `argparse` or `click` — small new dependency or stdlib effort
+
+---
+
+# ADR 16: Installation Strategy — dev.sh vs Published Distribution
+
+**Date:** 2026-05-26
+**Status:** Accepted
+**Author:** Claude Sonnet 4.6 / Cowork (bartosz.wichowski@dxc.com)
+
+## Context
+
+During development of the `feature_claude_desktop_init_process` branch, we discovered
+that `dev.sh install claude` is structurally unsuited for end-user distribution, for
+several compounding reasons:
+
+**1. Claude Desktop owns its config file.**
+`%APPDATA%\Claude\claude_desktop_config.json` is written back by Claude Desktop on
+every clean exit. If the script writes `mcpServers` while the app is running, the app
+overwrites the file on quit and the entry is lost. This is not a race condition that
+can be fixed with retries — it is a deliberate ownership boundary.
+
+**2. `$APPDATA` is never available inside WSL.**
+When a bash process runs inside WSL (whether launched interactively or via
+`wsl.exe -e`), Windows environment variables including `$APPDATA` are not inherited.
+The correct config path can only be resolved by shelling out to `cmd.exe` from within
+an interactive WSL session. This works for a developer running `./dev.sh` in a
+terminal; it is not reliable in non-interactive or CI contexts.
+
+**3. `wsl.exe -e <binary>` does not load the login profile.**
+When Claude Desktop launches the MCP server via `wsl.exe -e <binary>`, the WSL
+process starts without a login shell. `~/.local/bin` (where `uv` and `uvx` live) is
+not on PATH. Only binaries with absolute paths or those in `/usr/bin` are reachable.
+`wsl.exe bash -lc <cmd>` is required to get a full environment.
+
+**4. dev.sh requires the repo to be cloned first.**
+An end user should not need to clone a development repository to install an MCP
+server. The install should work from a published package.
+
+## Decision
+
+We formally separate two distinct workflows with different audiences, tools, and
+contracts:
+
+### Path A — Developer convenience (`dev.sh install claude`)
+
+**Audience:** contributors hacking on the server locally.
+**Purpose:** point Claude Desktop at the local dev build instead of the published package.
+**Behaviour:**
+- Writes the MCP config entry using the local venv Python (via `wsl.exe bash -lc`)
+- **Refuses to run if Claude Desktop is currently running** (hard exit with clear error)
+- User must either quit Claude Desktop first, or use `./dev.sh reinstall claude -r`
+  which manages the full stop→write→start lifecycle
+
+**What it is not:** an installer for end users. No distribution, no versioning, no
+update path. The `install` action header comment must say this explicitly.
+
+### Path B — Published distribution (`./dev.sh publish` → end user)
+
+**Audience:** anyone who wants to use TaskChampion MCP without contributing to it.
+**Steps:**
+1. `./dev.sh publish` pushes to PyPI as `taskchampion-mcp`
+2. The MCP Registry entry (`server.json`) is updated to reference the PyPI package
+3. End users add one entry to their `claude_desktop_config.json` (or Claude Desktop
+   installs it via the registry):
+
+**Native Linux / macOS:**
+```json
+{ "command": "uvx", "args": ["taskchampion-mcp"] }
+```
+
+**WSL (Taskwarrior lives inside WSL):**
+```json
+{
+  "command": "wsl.exe",
+  "args": ["bash", "-lc", "uvx taskchampion-mcp"]
+}
+```
+`bash -lc` is mandatory — it loads `~/.profile` / `~/.bashrc`, putting
+`~/.local/bin` on PATH where `uvx` (installed via `uv`) lives. `wsl.exe -e uvx`
+fails silently because `uvx` is not in the non-login PATH.
+
+**Cowork plugin (future):** bundle the MCP config entry + existing skills into a
+`.plugin` file for one-click install from the Cowork marketplace.
+
+### Testing the published path
+
+Manual end-to-end testing of the full publish → install → connect cycle is not
+acceptable as a merge gate. The automated test strategy is:
+
+1. **MCP protocol smoke test** (`./dev.sh smoke-test`, wired into CI):
+   Start the server as a subprocess, send `initialize` + `tools/list` over stdio,
+   assert the response contains the expected tool names and counts. This validates
+   the published package is protocol-correct without requiring a running Claude Desktop.
+
+2. **Install unit tests** (`tests/test_install.py`):
+   Test config-path resolution per platform (mock `uname` + `wslpath`), test that
+   `_upsert_mcp_entry` produces valid JSON with correct structure, test that
+   `_remove_mcp_entry` is idempotent and does not corrupt other keys.
+
+3. **TestPyPI pre-release gate** (`.github/workflows/publish.yml`):
+   Publish to TestPyPI first, run `uvx --index-url https://test.pypi.org/simple/
+   taskchampion-mcp --help` to confirm the package is importable and the entry point
+   resolves. Only promote to PyPI if this passes.
+
+## Alternatives Considered
+
+- **Fix `dev.sh install` to work while Claude Desktop is running** — not possible
+  without root access to pause the app's config flush; the ownership model is correct.
+- **Write to a separate JSON file that Claude Desktop imports** — Claude Desktop has
+  no such import mechanism.
+- **Use a PowerShell wrapper script** — avoids the WSL/bash complexity but adds a
+  new dependency for Windows users and still fights the config ownership problem.
+- **Ship a standalone installer binary (Go/Rust)** — correct long-term for a polished
+  product; premature at v0.3.0 alpha.
+
+## Consequences
+
+### Pros
+- dev.sh `install` becomes honest about what it is and refuses silently-broken states
+- End users get a one-line install that works across restarts without script intervention
+- `uvx` handles versioning, updates, and venv lifecycle transparently
+- The smoke test catches protocol regressions before they reach users
+- TestPyPI gate prevents broken packages from hitting the public registry
+
+### Cons
+- `uvx taskchampion-mcp` requires `uv` to be installed (near-universal for Python
+  developers; slightly more friction for non-Python users)
+- WSL users need to know to use `bash -lc` variant — must be prominent in docs
+- Full publish path cannot be tested locally without a TestPyPI account

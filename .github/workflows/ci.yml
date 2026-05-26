@@ -34,3 +34,11 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
+
+      - name: MCP protocol smoke test
+        # Validates the server speaks correct MCP over stdio without a live client.
+        # This is the automated gate for the published distribution path (ADR 16).
+        # A fake TASKDATA dir is used so the server starts cleanly without real tasks.
+        run: |
+          mkdir -p /tmp/taskdata-smoke
+          TASKDATA=/tmp/taskdata-smoke uv run python tests/smoke_test_mcp.py

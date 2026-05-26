@@ -223,6 +223,26 @@ _claude_desktop_server_args() {
     esac
 }
 
+_claude_desktop_is_running() {
+    # Returns 0 (true) if Claude Desktop is currently running, 1 if not.
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        wsl)
+            tasklist.exe 2>/dev/null | grep -qi "Claude.exe"
+            ;;
+        windows_shell)
+            tasklist 2>/dev/null | grep -qi "Claude.exe"
+            ;;
+        macos)
+            pgrep -qf "Claude" 2>/dev/null
+            ;;
+        linux)
+            pgrep -qf "claude-desktop" 2>/dev/null
+            ;;
+    esac
+}
+
 _claude_desktop_terminate() {
     # Gracefully stop Claude Desktop on the current platform.
     local platform
@@ -542,6 +562,17 @@ with open(path, 'w') as f:
 }
 
 action_install() {
+    # -------------------------------------------------------------------------
+    # DEVELOPER CONVENIENCE ONLY — NOT AN END-USER INSTALLER
+    #
+    # This command points Claude Desktop at the local dev build (your checkout).
+    # It is intended for contributors iterating on the server source.
+    #
+    # For end-user installation see: https://github.com/GabiUp2/TaskChampion_MCP
+    # The published path is:  uvx taskchampion-mcp          (Linux / macOS)
+    #                         wsl.exe bash -lc "uvx taskchampion-mcp"  (WSL)
+    # See ADR 16 for the full rationale.
+    # -------------------------------------------------------------------------
     _ensure_venv
 
     # Default server invocation (non-claude targets)
@@ -614,6 +645,26 @@ action_install() {
         fi
         local cfg_path="${ide_configs[$target]}"
         local cfg_name="${ide_labels[$target]}"
+
+        # Claude Desktop: hard-refuse if the app is running.
+        # Claude Desktop owns claude_desktop_config.json and flushes its in-memory
+        # state back to disk on exit — any mcpServers entry written while the app is
+        # open will be silently overwritten when the user quits.  The only safe window
+        # to write the config is when the app is not running.
+        if [ "$target" = "claude" ] && _claude_desktop_is_running; then
+            echo ""
+            fail "Claude Desktop is currently running."
+            echo ""
+            echo "  Writing the MCP config while Claude Desktop is open is unsafe:"
+            echo "  the app overwrites claude_desktop_config.json on exit, silently"
+            echo "  discarding any changes made while it was running."
+            echo ""
+            echo "  Options:"
+            echo "    ./dev.sh reinstall claude -r   — stops the app, writes config, restarts"
+            echo "    Quit Claude Desktop manually, then re-run: ./dev.sh install claude"
+            echo ""
+            exit 1
+        fi
 
         # Claude Desktop needs a platform-aware server command/args (Windows path on WSL/Git Bash)
         if [ "$target" = "claude" ]; then
@@ -705,6 +756,19 @@ action_install() {
         warn "No targets selected."
         return
     fi
+
+    # Guard: refuse if Claude Desktop is selected and currently running
+    for key in "${selected[@]}"; do
+        if [ "$key" = "claude" ] && _claude_desktop_is_running; then
+            echo ""
+            fail "Claude Desktop is currently running — cannot install safely."
+            echo ""
+            echo "  Claude Desktop overwrites its config on exit."
+            echo "  Quit Claude Desktop first, or use: ./dev.sh reinstall claude -r"
+            echo ""
+            exit 1
+        fi
+    done
 
     echo ""
     for key in "${selected[@]}"; do
@@ -954,6 +1018,23 @@ action_reinstall() {
     info "Reinstall complete."
 }
 
+action_smoke_test() {
+    # Run the MCP protocol smoke test: start the server, handshake, assert tool surface.
+    # This is the automated gate for the published distribution path — it validates that
+    # the server speaks correct MCP without requiring a running Claude Desktop instance.
+    # See ADR 16 and tests/smoke_test_mcp.py for rationale.
+    _ensure_venv
+    info "Running MCP protocol smoke test..."
+    "$VENV_DIR/bin/python" tests/smoke_test_mcp.py
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        ok "Smoke test passed."
+    else
+        fail "Smoke test FAILED. The server did not respond correctly to MCP handshake."
+        exit 1
+    fi
+}
+
 action_publish() {
     _ensure_venv
     _ensure_uv
@@ -1117,7 +1198,8 @@ action_help() {
     echo "  format    Run ruff formatter on src/ and tests/"
     echo "  run       Start the MCP server in stdio mode"
     echo "  inspect   Start the MCP Inspector for interactive debugging"
-    echo "  publish   Build and publish to PyPI + MCP Registry"
+    echo "  smoke-test  Start server, run MCP handshake, assert tool surface (CI gate for publish path)
+  publish   Build and publish to PyPI + MCP Registry"
     echo "  clean     Remove build artifacts, caches, and virtual environment"
     echo "  list      Show all project-related installed components"
     echo "  help      Show this help message"
@@ -1139,6 +1221,7 @@ case "${1:-help}" in
     format)    action_format ;;
     run)       action_run ;;
     inspect)   action_inspect ;;
+    smoke-test) action_smoke_test ;;
     publish)   action_publish ;;
     clean)     action_clean ;;
     list)      action_list ;;
