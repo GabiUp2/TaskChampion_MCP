@@ -116,15 +116,21 @@ def create_server(
         rate_limiter=rate_limiter,
         audit=audit,
     )
+    onboarding_required = requires_onboarding(config)
 
     # --- Create FastMCP server ----------------------------------------------
     mcp = FastMCP(
         "TaskChampion MCP",
-        instructions=_build_instructions(config, schema, tw_version),
+        instructions=_build_instructions(
+    config,
+    schema,
+    tw_version,
+    onboarding_required=onboarding_required,
+),
     )
 
     # --- Register tools by role level ---------------------------------------
-    if requires_onboarding(config):
+    if onboarding_required(config):
         _register_onboarding_tools(mcp, registry)
     else:
         _register_contributor_tools(mcp, registry)
@@ -553,7 +559,44 @@ def _build_instructions(
     config: ServerConfig,
     schema: TaskSchema,
     tw_version: str | None,
+    *,
+    onboarding_required: bool,
 ) -> str:
+
+    if onboarding_required:
+        return "\n".join(
+            [
+                "You are interacting with a Taskwarrior 3.x task database via the TaskChampion MCP server.",
+                "",
+                "This MCP installation is visible, but it is not initialised yet.",
+                "",
+                "The current role and schema are safe runtime fallbacks only:",
+                f"- fallback role: {config.role}",
+                f"- fallback schema: {schema.name} (v{schema.version})",
+                f"- Taskwarrior version: {tw_version or 'unknown'}",
+                "",
+                "Do not present the fallback role or fallback schema as user-selected configuration.",
+                "Do not claim normal task-management capabilities yet.",
+                "Do not read, modify, annotate, create, complete, delete, undo, or sync tasks until onboarding is complete.",
+                "",
+                "Your first task is to help the user initialise the MCP configuration.",
+                "",
+                "Initialisation decisions to guide:",
+                "1. MCP role scope: CONTRIBUTOR, GENERATOR, or MANAGER.",
+                "2. Schema source: generated from taxonomy, inferred from existing tasks, hybrid, or bundled preset.",
+                "3. Optional taxonomy path / workflow taxonomy.",
+                "",
+                "Available onboarding flow:",
+                "- call get_initialisation_status first",
+                "- then call propose_initialisation_options",
+                "- for taxonomy or task inference: generate_initial_schema_preview, show the user a summary, then save_initial_schema only after approval",
+                "- for preset selection: list_preset_schemas, let the user choose, then use_preset_schema",
+                "",
+                "Never silently invent workflow semantics.",
+                "Never save a schema the user has not approved.",
+            ]
+        )
+
     lines = [
         "You are interacting with a Taskwarrior 3.x task database via the TaskChampion MCP server.",
         "",
