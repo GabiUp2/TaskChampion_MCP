@@ -103,6 +103,220 @@ _check_cmd() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Platform detection & Claude Desktop helpers
+# ---------------------------------------------------------------------------
+
+_detect_platform() {
+    # Returns one of: macos | wsl | windows_shell | linux
+    # wsl          — bash running inside Windows Subsystem for Linux
+    # windows_shell — bash running inside Git Bash / MSYS2 / Cygwin on Windows
+    # macos        — native macOS shell
+    # linux        — native Linux shell (no Windows layer)
+    case "$(uname -s)" in
+        Darwin)
+            echo "macos"
+            ;;
+        Linux)
+            if grep -qiE "microsoft|WSL" /proc/version 2>/dev/null; then
+                echo "wsl"
+            else
+                echo "linux"
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "windows_shell"
+            ;;
+        *)
+            echo "linux"
+            ;;
+    esac
+}
+
+_claude_desktop_config_path() {
+    # Returns the platform-correct path to Claude Desktop's MCP config file.
+    #
+    # macOS        : ~/Library/Application Support/Claude/claude_desktop_config.json
+    # WSL          : /mnt/c/Users/<user>/AppData/Roaming/Claude/claude_desktop_config.json
+    # Git Bash     : $APPDATA/Claude/claude_desktop_config.json  (Windows-style, resolved by bash)
+    # Linux        : ${XDG_CONFIG_HOME:-~/.config}/claude/claude_desktop_config.json
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        macos)
+            echo "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+            ;;
+        wsl)
+            local win_appdata=""
+            # $APPDATA is usually inherited from Windows into WSL environment
+            if [ -n "${APPDATA:-}" ]; then
+                win_appdata="$(wslpath "$APPDATA" 2>/dev/null || echo "")"
+            fi
+            # Fallback: query Windows USERNAME and build path manually
+            if [ -z "$win_appdata" ]; then
+                local win_user
+                win_user="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || echo "")"
+                [ -n "$win_user" ] && win_appdata="/mnt/c/Users/${win_user}/AppData/Roaming"
+            fi
+            if [ -n "$win_appdata" ]; then
+                echo "${win_appdata}/Claude/claude_desktop_config.json"
+            else
+                warn "Cannot resolve Windows AppData in WSL; falling back to XDG path."
+                echo "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+            fi
+            ;;
+        windows_shell)
+            # Git Bash / MSYS2: Windows injects $APPDATA as a Windows-style path;
+            # bash here resolves it automatically (e.g. C:\Users\...\AppData\Roaming).
+            if [ -n "${APPDATA:-}" ]; then
+                echo "${APPDATA}/Claude/claude_desktop_config.json"
+            else
+                echo "${USERPROFILE:-$HOME}/AppData/Roaming/Claude/claude_desktop_config.json"
+            fi
+            ;;
+        linux)
+            echo "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+            ;;
+    esac
+}
+
+_claude_desktop_server_command() {
+    # Returns the command Claude Desktop should use to launch the MCP server.
+    # Claude Desktop is always a *native Windows process* on WSL/windows_shell,
+    # so it needs Windows-style paths it can actually execute.
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        wsl)
+            # Prefer the Windows-side Python inside the venv (Scripts\python.exe).
+            # If the venv was created from WSL it will have bin/python (Linux), not
+            # Scripts/python.exe (Windows).  In that case fall back to uv on Windows PATH.
+            local win_scripts="${VENV_DIR}/Scripts/python.exe"
+            if [ -f "$win_scripts" ] && command -v wslpath &>/dev/null; then
+                wslpath -w "$win_scripts" 2>/dev/null || echo "uv"
+            else
+                # uv is typically on the Windows PATH and can run the project
+                echo "uv"
+            fi
+            ;;
+        windows_shell)
+            # Git Bash venvs use Scripts\python.exe
+            echo "${VENV_DIR}/Scripts/python.exe"
+            ;;
+        *)
+            # macOS / Linux
+            echo "${VENV_DIR}/bin/python"
+            ;;
+    esac
+}
+
+_claude_desktop_server_args() {
+    # Returns a JSON array string for the MCP server args entry.
+    # When falling back to uv, point it at the project directory so it can find pyproject.toml.
+    local cmd
+    cmd="$(_claude_desktop_server_command)"
+    if [[ "$cmd" == "uv" ]]; then
+        local win_project_dir
+        win_project_dir="$(wslpath -w "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")"
+        # Escape backslashes for embedding inside a JSON string
+        win_project_dir="${win_project_dir//\\/\\\\}"
+        echo "[\"--directory\", \"${win_project_dir}\", \"run\", \"-m\", \"taskchampion_mcp.server\"]"
+    else
+        echo "[\"-m\", \"taskchampion_mcp.server\"]"
+    fi
+}
+
+_claude_desktop_terminate() {
+    # Gracefully stop Claude Desktop on the current platform.
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        macos)
+            _ide_terminate_gracefully "Claude Desktop" "Claude"
+            ;;
+        wsl)
+            if tasklist.exe 2>/dev/null | grep -qi "Claude.exe"; then
+                info "Gracefully terminating Claude Desktop (Windows process)..."
+                taskkill.exe /IM "Claude.exe" 2>/dev/null || true
+                local count=0
+                while tasklist.exe 2>/dev/null | grep -qi "Claude.exe" && [ $count -lt 5 ]; do
+                    sleep 1; count=$((count + 1))
+                done
+                if tasklist.exe 2>/dev/null | grep -qi "Claude.exe"; then
+                    warn "Claude Desktop did not stop gracefully; force-killing..."
+                    taskkill.exe /F /IM "Claude.exe" 2>/dev/null || true
+                    sleep 1
+                fi
+                ok "Claude Desktop terminated."
+            else
+                info "Claude Desktop is not running."
+            fi
+            ;;
+        windows_shell)
+            if tasklist 2>/dev/null | grep -qi "Claude.exe"; then
+                info "Gracefully terminating Claude Desktop..."
+                taskkill //IM "Claude.exe" 2>/dev/null || true
+                sleep 3
+                tasklist 2>/dev/null | grep -qi "Claude.exe" && \
+                    { taskkill //F //IM "Claude.exe" 2>/dev/null || true; }
+                ok "Claude Desktop terminated."
+            else
+                info "Claude Desktop is not running."
+            fi
+            ;;
+        linux)
+            _ide_terminate_gracefully "Claude Desktop" "claude-desktop"
+            ;;
+    esac
+}
+
+_claude_desktop_start() {
+    # Launch Claude Desktop on the current platform.
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        macos)
+            info "Starting Claude Desktop..."
+            if open -a "Claude" &>/dev/null; then
+                ok "Claude Desktop started."
+            else
+                warn "Could not start Claude Desktop. Please launch it manually."
+            fi
+            ;;
+        wsl)
+            info "Starting Claude Desktop (Windows)..."
+            local localappdata_win
+            localappdata_win="$(cmd.exe /c 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r\n')"
+            if [ -n "$localappdata_win" ]; then
+                local localappdata_wsl
+                localappdata_wsl="$(wslpath "$localappdata_win" 2>/dev/null || echo "")"
+                if [ -n "$localappdata_wsl" ] && [ -f "${localappdata_wsl}/AnthropicClaude/claude.exe" ]; then
+                    cmd.exe /c "start \"\" \"${localappdata_win}\\AnthropicClaude\\claude.exe\"" &>/dev/null \
+                        && ok "Claude Desktop started." \
+                        || warn "Could not start Claude Desktop. Please launch it manually."
+                    return
+                fi
+            fi
+            warn "Claude Desktop executable not found. Please launch it manually."
+            ;;
+        windows_shell)
+            info "Starting Claude Desktop..."
+            local claude_exe="${LOCALAPPDATA:-${USERPROFILE}/AppData/Local}/AnthropicClaude/claude.exe"
+            if [ -f "$claude_exe" ]; then
+                cmd //c start "" "$claude_exe" &>/dev/null \
+                    && ok "Claude Desktop started." \
+                    || warn "Could not start Claude Desktop. Please launch it manually."
+            else
+                warn "Claude Desktop executable not found at: ${claude_exe}"
+                warn "Please launch Claude Desktop manually."
+            fi
+            ;;
+        linux)
+            _ide_start "Claude Desktop" "claude-desktop"
+            ;;
+    esac
+}
+
 _ensure_uv() {
     if ! command -v uv &>/dev/null; then
         fail "uv is not installed. Install it: https://docs.astral.sh/uv/getting-started/installation/"
@@ -195,11 +409,13 @@ action_check() {
     # IDE MCP config files — check for existing taskchampion server entry
     echo ""
     info "Checking IDE MCP configurations..."
+    local _claude_cfg
+    _claude_cfg="$(_claude_desktop_config_path)"
     local mcp_configs=(
         "$HOME/.codeium/windsurf/mcp_config.json:Windsurf"
         "$HOME/.cursor/mcp.json:Cursor"
         "$HOME/.vscode/mcp.json:VS Code"
-        "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json:Claude Desktop"
+        "${_claude_cfg}:Claude Desktop"
     )
     local found_any_config=false
     for entry in "${mcp_configs[@]}"; do
@@ -331,15 +547,20 @@ with open(path, 'w') as f:
 action_install() {
     _ensure_venv
 
+    # Default server invocation (non-claude targets)
     local server_command="${VENV_DIR}/bin/python"
     local server_args='["-m", "taskchampion_mcp.server"]'
+
+    # Claude Desktop config path is platform-aware (macOS / WSL / Windows / Linux differ)
+    local _claude_cfg
+    _claude_cfg="$(_claude_desktop_config_path)"
 
     # All known IDE MCP config locations
     local -A ide_configs=(
         [windsurf]="$HOME/.codeium/windsurf/mcp_config.json"
         [cursor]="$HOME/.cursor/mcp.json"
         [vscode]="$HOME/.vscode/mcp.json"
-        [claude]="${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+        [claude]="${_claude_cfg}"
     )
     local -A ide_labels=(
         [windsurf]="Windsurf"
@@ -352,14 +573,14 @@ action_install() {
         [windsurf]="windsurf"
         [cursor]="cursor"
         [vscode]="code"
-        [claude]="claude"
+        [claude]="__claude_desktop__"   # sentinel — handled by _claude_desktop_terminate
     )
     # IDE start commands
     local -A ide_start_commands=(
         [windsurf]="windsurf"
         [cursor]="cursor"
         [vscode]="code"
-        [claude]="claude"
+        [claude]="__claude_desktop__"   # sentinel — handled by _claude_desktop_start
     )
 
     local target="${1:-}"
@@ -396,8 +617,12 @@ action_install() {
         fi
         local cfg_path="${ide_configs[$target]}"
         local cfg_name="${ide_labels[$target]}"
-        local process_name="${ide_processes[$target]:-$target}"
-        local start_command="${ide_start_commands[$target]:-$target}"
+
+        # Claude Desktop needs a platform-aware server command/args (Windows path on WSL/Git Bash)
+        if [ "$target" = "claude" ]; then
+            server_command="$(_claude_desktop_server_command)"
+            server_args="$(_claude_desktop_server_args)"
+        fi
 
         info "Installing taskchampion MCP entry into ${cfg_name} config..."
         _upsert_mcp_entry "$cfg_path" "$cfg_name" "$server_command" "$server_args"
@@ -405,14 +630,22 @@ action_install() {
         echo ""
         info "Entry added:"
         echo "  command: ${server_command}"
-        echo "  args:    -m taskchampion_mcp.server"
+        echo "  args:    $(echo "$server_args" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))' 2>/dev/null || echo "$server_args")"
         echo ""
 
         if [ "$restart_after" = true ]; then
             info "Restarting ${cfg_name}..."
-            _ide_terminate_gracefully "$cfg_name" "$process_name"
-            sleep 1
-            _ide_start "$cfg_name" "$start_command"
+            if [ "$target" = "claude" ]; then
+                _claude_desktop_terminate
+                sleep 1
+                _claude_desktop_start
+            else
+                local process_name="${ide_processes[$target]:-$target}"
+                local start_command="${ide_start_commands[$target]:-$target}"
+                _ide_terminate_gracefully "$cfg_name" "$process_name"
+                sleep 1
+                _ide_start "$cfg_name" "$start_command"
+            fi
             echo ""
         else
             info "Next steps:"
@@ -480,28 +713,39 @@ action_install() {
     for key in "${selected[@]}"; do
         local cfg_path="${ide_configs[$key]}"
         local cfg_name="${ide_labels[$key]}"
+        # Per-target server command/args
+        local _sc="$server_command"
+        local _sa="$server_args"
+        if [ "$key" = "claude" ]; then
+            _sc="$(_claude_desktop_server_command)"
+            _sa="$(_claude_desktop_server_args)"
+        fi
         info "Installing into ${cfg_name}..."
-        _upsert_mcp_entry "$cfg_path" "$cfg_name" "$server_command" "$server_args"
+        _upsert_mcp_entry "$cfg_path" "$cfg_name" "$_sc" "$_sa"
         ok "${cfg_name}: ${cfg_path}"
     done
 
     echo ""
-    info "MCP server entry:"
-    echo "  command: ${server_command}"
-    echo "  args:    -m taskchampion_mcp.server"
+    info "MCP server entry written. Restart your IDE(s) to pick up the new server."
     echo ""
 
-    # Ask if user wants to restart IDEs
+    # Ask if user wants to restart IDEs (only when a single target was selected)
     if [ ${#selected[@]} -eq 1 ]; then
         local key="${selected[0]}"
         local cfg_name="${ide_labels[$key]}"
-        local process_name="${ide_processes[$key]:-$key}"
-        local start_command="${ide_start_commands[$key]:-$key}"
         read -rp "Restart ${cfg_name} now? [y/N]: " restart_answer
         if [[ "$restart_answer" == "y" || "$restart_answer" == "Y" ]]; then
-            _ide_terminate_gracefully "$cfg_name" "$process_name"
-            sleep 1
-            _ide_start "$cfg_name" "$start_command"
+            if [ "$key" = "claude" ]; then
+                _claude_desktop_terminate
+                sleep 1
+                _claude_desktop_start
+            else
+                local process_name="${ide_processes[$key]:-$key}"
+                local start_command="${ide_start_commands[$key]:-$key}"
+                _ide_terminate_gracefully "$cfg_name" "$process_name"
+                sleep 1
+                _ide_start "$cfg_name" "$start_command"
+            fi
         else
             info "Next steps:"
             echo "  1. Restart your IDE to pick up the new MCP server"
@@ -518,12 +762,15 @@ action_install() {
 }
 
 action_uninstall() {
+    local _claude_cfg
+    _claude_cfg="$(_claude_desktop_config_path)"
+
     # All known IDE MCP config locations
     local -A ide_configs=(
         [windsurf]="$HOME/.codeium/windsurf/mcp_config.json"
         [cursor]="$HOME/.cursor/mcp.json"
         [vscode]="$HOME/.vscode/mcp.json"
-        [claude]="${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+        [claude]="${_claude_cfg}"
     )
     local -A ide_labels=(
         [windsurf]="Windsurf"
@@ -609,12 +856,15 @@ action_uninstall() {
 }
 
 action_reinstall() {
+    local _claude_cfg
+    _claude_cfg="$(_claude_desktop_config_path)"
+
     # All known IDE MCP config locations
     local -A ide_configs=(
         [windsurf]="$HOME/.codeium/windsurf/mcp_config.json"
         [cursor]="$HOME/.cursor/mcp.json"
         [vscode]="$HOME/.vscode/mcp.json"
-        [claude]="${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+        [claude]="${_claude_cfg}"
     )
     local -A ide_labels=(
         [windsurf]="Windsurf"
@@ -627,14 +877,14 @@ action_reinstall() {
         [windsurf]="windsurf"
         [cursor]="cursor"
         [vscode]="code"
-        [claude]="claude"
+        [claude]="__claude_desktop__"   # sentinel — handled by _claude_desktop_terminate
     )
     # IDE start commands
     local -A ide_start_commands=(
         [windsurf]="windsurf"
         [cursor]="cursor"
         [vscode]="code"
-        [claude]="claude"
+        [claude]="__claude_desktop__"   # sentinel — handled by _claude_desktop_start
     )
 
     local target="${1:-}"
@@ -678,7 +928,11 @@ action_reinstall() {
     echo ""
 
     # Gracefully terminate the IDE if running
-    _ide_terminate_gracefully "$cfg_name" "$process_name"
+    if [ "$target" = "claude" ]; then
+        _claude_desktop_terminate
+    else
+        _ide_terminate_gracefully "$cfg_name" "$process_name"
+    fi
     echo ""
 
     # Uninstall and reinstall
@@ -690,14 +944,17 @@ action_reinstall() {
         action_install "$target" -r
     else
         action_install "$target"
+        echo ""
+        if [ "$target" = "claude" ]; then
+            info "You can now start Claude Desktop again if needed."
+            info "Or use: ./dev.sh reinstall claude -r"
+        else
+            info "You can now start ${cfg_name} again if needed."
+            info "Or use: ./dev.sh reinstall ${target} -r"
+        fi
     fi
-    echo ""
 
     info "Reinstall complete."
-    if [ "$restart_after" = false ]; then
-        info "You can now start ${cfg_name} again if needed."
-        info "Or use: ./dev.sh reinstall ${target} -r"
-    fi
 }
 
 action_publish() {
@@ -785,10 +1042,12 @@ action_clean() {
     # Remove taskchampion entries from IDE MCP config files
     echo ""
     info "Removing taskchampion from IDE MCP configurations..."
+    local _claude_cfg
+    _claude_cfg="$(_claude_desktop_config_path)"
     _remove_mcp_entry "$HOME/.codeium/windsurf/mcp_config.json" "Windsurf"
     _remove_mcp_entry "$HOME/.cursor/mcp.json" "Cursor"
     _remove_mcp_entry "$HOME/.vscode/mcp.json" "VS Code"
-    _remove_mcp_entry "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json" "Claude Desktop"
+    _remove_mcp_entry "${_claude_cfg}" "Claude Desktop"
 
     ok "Clean complete."
 }
