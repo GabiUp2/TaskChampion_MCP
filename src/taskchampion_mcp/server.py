@@ -88,10 +88,7 @@ def create_server(
 
     # --- Init required ------------------------------------------------------
     def requires_onboarding(config: ServerConfig) -> bool:
-        return not (
-            config.explicit_role_configured
-            and config.explicit_schema_configured
-        )
+        return not (config.explicit_role_configured and config.explicit_schema_configured)
 
     # --- Load schema --------------------------------------------------------
     schema: TaskSchema
@@ -151,7 +148,6 @@ def create_server(
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
-
 
 
 def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
@@ -294,9 +290,9 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             )
         )
 
+
 def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     """Register CONTRIBUTOR-level tools (read + annotate + modify)."""
-
 
     @mcp.tool()
     def list_tasks(

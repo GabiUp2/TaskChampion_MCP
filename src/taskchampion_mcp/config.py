@@ -62,7 +62,7 @@ class ServerConfig:
     # Configuration file status
     config_file_exists: bool = False
     explicit_role_configured: bool = False
-    explicit_schema_configured:bool = False
+    explicit_schema_configured: bool = False
     explicit_taxonomy_configured: bool = False
     redacted_fields: list[str] = field(default_factory=list)
     taxonomy_path: str | None = None
@@ -130,6 +130,7 @@ def load_config(path: Path | None = None) -> ServerConfig:
 
         server = data.get("server", {})
         cfg.role = Role.validate(server.get("role", cfg.role))
+        cfg.config_file_exists = path.exists()
         cfg.schema_name = server.get("schema", cfg.schema_name)
         cfg.schema_path = server.get("schema_path", cfg.schema_path)
         cfg.task_binary = server.get("task_binary", cfg.task_binary)
