@@ -182,29 +182,25 @@ _claude_desktop_config_path() {
 
 _claude_desktop_server_command() {
     # Returns the command Claude Desktop should use to launch the MCP server.
-    # Claude Desktop is always a *native Windows process* on WSL/windows_shell,
-    # so it needs Windows-style paths it can actually execute.
+    #
+    # Key insight for WSL: Claude Desktop is a native Windows process, but Taskwarrior
+    # and the Python venv live inside WSL.  The correct bridge is `wsl.exe -e <linux-cmd>`:
+    # Claude Desktop (Windows) launches wsl.exe, which executes the command inside the
+    # default WSL distro where both Python and `task` are available.  No Windows-side
+    # Python or uv install is required.
     local platform
     platform="$(_detect_platform)"
     case "$platform" in
         wsl)
-            # Prefer the Windows-side Python inside the venv (Scripts\python.exe).
-            # If the venv was created from WSL it will have bin/python (Linux), not
-            # Scripts/python.exe (Windows).  In that case fall back to uv on Windows PATH.
-            local win_scripts="${VENV_DIR}/Scripts/python.exe"
-            if [ -f "$win_scripts" ] && command -v wslpath &>/dev/null; then
-                wslpath -w "$win_scripts" 2>/dev/null || echo "uv"
-            else
-                # uv is typically on the Windows PATH and can run the project
-                echo "uv"
-            fi
+            # wsl.exe is always on the Windows PATH when WSL is installed
+            echo "wsl.exe"
             ;;
         windows_shell)
-            # Git Bash venvs use Scripts\python.exe
+            # Git Bash / MSYS2: venv was (should be) created here, so Scripts\python.exe exists
             echo "${VENV_DIR}/Scripts/python.exe"
             ;;
         *)
-            # macOS / Linux
+            # macOS / native Linux
             echo "${VENV_DIR}/bin/python"
             ;;
     esac
@@ -212,18 +208,19 @@ _claude_desktop_server_command() {
 
 _claude_desktop_server_args() {
     # Returns a JSON array string for the MCP server args entry.
-    # When falling back to uv, point it at the project directory so it can find pyproject.toml.
-    local cmd
-    cmd="$(_claude_desktop_server_command)"
-    if [[ "$cmd" == "uv" ]]; then
-        local win_project_dir
-        win_project_dir="$(wslpath -w "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")"
-        # Escape backslashes for embedding inside a JSON string
-        win_project_dir="${win_project_dir//\\/\\\\}"
-        echo "[\"--directory\", \"${win_project_dir}\", \"run\", \"-m\", \"taskchampion_mcp.server\"]"
-    else
-        echo "[\"-m\", \"taskchampion_mcp.server\"]"
-    fi
+    local platform
+    platform="$(_detect_platform)"
+    case "$platform" in
+        wsl)
+            # Pass the Linux-side venv Python path directly to wsl.exe.
+            # wsl.exe resolves it inside WSL — no path conversion needed since
+            # VENV_DIR is already a valid WSL (Linux) path.
+            echo "[\"-e\", \"${VENV_DIR}/bin/python\", \"-m\", \"taskchampion_mcp.server\"]"
+            ;;
+        *)
+            echo "[\"-m\", \"taskchampion_mcp.server\"]"
+            ;;
+    esac
 }
 
 _claude_desktop_terminate() {
