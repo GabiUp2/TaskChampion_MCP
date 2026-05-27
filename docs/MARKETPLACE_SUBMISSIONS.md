@@ -45,8 +45,6 @@ None (local server)
 - `sync_tasks` — Trigger task sync via TaskChampion
 - `get_time_status` — Check Timewarrior tracking status
 - `get_time_summary` — Get time tracking summary
-- `timew_start` — Start time tracking
-- `timew_stop` — Stop time tracking
 
 ### Config Snippet
 ```json

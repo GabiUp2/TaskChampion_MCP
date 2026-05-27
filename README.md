@@ -107,12 +107,13 @@ This tool gives an LLM indirect access to your task management CLI. Security is 
 - **No shell execution** — all CLI calls use subprocess argument lists, never `shell=True`
 - **Input sanitization** — all LLM inputs validated against allowlists before passing to CLI
 - **Rate limiting** — configurable per-minute/per-hour caps prevent runaway loops
-- **Audit logging** — every operation logged with timestamp, tool, parameters, and result
-- **Dry-run mode** — preview changes before executing
-- **Confirmation mode** — destructive operations (delete, done) require explicit confirmation
+- **Audit logging** — every operation logged with timestamp, tool, parameters, result, and `result_code`
+- **Code-tagged envelopes** — every tool response includes a stable `code` field for machine-safe branching
+- **Dry-run mode** — every destructive operation supports `dry_run` preview without mutation
+- **Confirmation mode** — lifecycle operations use explicit confirmation tokens when confirmation is enabled
 - **Sensitive field redaction** — configurable fields hidden from LLM responses
 
-See [ADR 9](docs/adrs/ADRs.md) for the full security design.
+See [ADR 9](docs/adrs/ADRs.md), [ADR 13](docs/adrs/ADRs.md), and [ADR 14](docs/adrs/ADRs.md) for the full security and observability design.
 
 ---
 
@@ -133,7 +134,7 @@ We focus on the modern Taskwarrior 3.x + TaskChampion stack. Taskserver (taskd) 
 |---|---|
 | [`docs/adrs/`](docs/adrs/) | Architecture Decision Records |
 | [`docs/references/`](docs/references/) | Upstream tool reference (Taskd, TaskChampion, Timewarrior) |
-| [`docs/manuals/`](docs/manuals/) | User and technical manuals (coming soon) |
+| [`docs/manuals/`](docs/manuals/) | Operational manuals (for example [`logrotate.md`](docs/manuals/logrotate.md)) |
 | [`docs/llm_context/`](docs/llm_context/) | LLM agent guidelines and tracked assumptions |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to contribute (branching, PRs, versioning) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Feature roadmap (v0.1.0 → v1.0.0) |

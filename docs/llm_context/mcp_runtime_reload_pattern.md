@@ -52,8 +52,8 @@ If the server is not initialised, the tool should return a structured, non-mutat
   "safe_to_mutate_tasks": false,
   "message": "TaskChampion MCP is not initialised. Select a preset or save a reviewed schema first.",
   "next_tools": [
-    "get_initialisation_status",
-    "propose_initialisation_options",
+    "get_initialization_status",
+    "propose_initialization_options",
     "list_preset_schemas",
     "use_preset_schema",
     "save_initial_schema",
@@ -221,7 +221,7 @@ Add tests for the following:
 
 1. Before initialisation, normal task tools are registered/visible but return `requires_initialisation` instead of mutating or reading tasks.
 2. `use_preset_schema("authors_custom_example")` updates config and triggers runtime reload.
-3. After preset selection, `get_initialisation_status` reports:
+3. After preset selection, `get_initialization_status` reports:
    - `initialised: true`
    - `needs_onboarding: false`
    - `safe_to_mutate_tasks: true`
@@ -240,10 +240,10 @@ The change is done when this flow works without restarting Windsurf/Cascade:
 
 ```text
 1. Start MCP server with no config.toml.
-2. Ask model to call get_initialisation_status.
+2. Ask model to call get_initialization_status.
 3. Ask model to call list_preset_schemas.
 4. Ask model to call use_preset_schema("authors_custom_example").
-5. Immediately call get_initialisation_status again.
+5. Immediately call get_initialization_status again.
 6. Immediately call get_schema_info.
 ```
 
