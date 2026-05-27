@@ -939,3 +939,119 @@ def test_reconfigure_round_trip_then_load_config_sees_new_state(monkeypatch):
     assert post.schema_name == "gtd"
     assert post.explicit_role_configured is True
     assert post.explicit_schema_configured is True
+
+
+# ---------------------------------------------------------------------------
+# dry_run support for reconfigure_* (audit finding #6 / v0.3.2)
+#
+# Every other write tool in the codebase honours dry_run. The reconfigure
+# tools used to be the asymmetric exception; v0.3.2 brings them into the
+# same pattern. The load-bearing invariant: dry_run=True must NEVER touch
+# config.toml, regardless of whether the inputs were valid or invalid.
+# ---------------------------------------------------------------------------
+
+
+def test_reconfigure_active_schema_dry_run_with_preset_name(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="gtd", dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["schema_name"] == "gtd"
+    assert result["preview"]["would_write"] == {"schema": "gtd"}
+    # Critical: NO disk write on dry_run
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_active_schema_dry_run_with_path(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    custom = tmp_path / "custom.toml"
+    custom.write_text('[meta]\nname = "custom"\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_path=str(custom), dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["schema_path"] == str(custom.resolve())
+    assert "would_write" in result["preview"]
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_active_schema_dry_run_still_validates(tmp_path, monkeypatch):
+    """Validation runs even in dry_run mode — bad input is rejected, no
+    file written."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="bogus", dry_run=True)
+    assert result["error"] is True
+    assert "Unknown preset" in result["message"]
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_taxonomy_path_dry_run(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    taxonomy = tmp_path / "TAXONOMY.md"
+    taxonomy.write_text("# tax", encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_taxonomy_path(str(taxonomy), dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["taxonomy_path"] == str(taxonomy.resolve())
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_role_dry_run_downgrade(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.MANAGER,
+        target_role=Role.CONTRIBUTOR,
+        dry_run=True,
+    )
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["previous_role"] == Role.MANAGER
+    assert result["new_role"] == Role.CONTRIBUTOR
+    assert result["preview"]["would_write"] == {"role": Role.CONTRIBUTOR}
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_role_dry_run_does_not_bypass_elevation_refusal(tmp_path, monkeypatch):
+    """ADR 17 invariant: a forbidden elevation is forbidden whether or not
+    the LLM was just "asking". dry_run=True still returns the refusal —
+    it does NOT silently succeed as a "preview"."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.CONTRIBUTOR,
+        target_role=Role.MANAGER,
+        dry_run=True,
+    )
+    assert result["error"] is True
+    assert result["error_code"] == _ROLE_ELEVATION_FORBIDDEN_CODE
+    # Importantly: no "code: dry_run" — refusal trumps preview
+    assert result.get("code") != "dry_run"
+    assert not cfg_path.exists()

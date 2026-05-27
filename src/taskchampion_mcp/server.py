@@ -741,12 +741,18 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     def set_active_schema(
         schema_name: str = "",
         schema_path: str = "",
+        dry_run: bool = False,
     ) -> str:
         """Switch the active task schema.
 
         Exactly one of ``schema_name`` (a bundled preset such as
         'minimal' / 'gtd' / 'kanban' / 'scrum') or ``schema_path``
         (an absolute path to a custom TOML schema) must be provided.
+
+        Set ``dry_run=true`` to validate the inputs and preview the
+        config write without touching ``config.toml`` — useful for
+        confirming a preset name spells correctly or a schema_path
+        exists before committing. Returns code="dry_run" per ADR 14.
 
         Updates config.toml; takes effect on next MCP server restart
         (runtime reload is not yet implemented). Does not mutate any
@@ -757,17 +763,19 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         params = {
             "schema_name": schema_name or None,
             "schema_path": schema_path or None,
+            "dry_run": dry_run,
         }
         return json.dumps(_audit_call(
             reg, "set_active_schema", params,
             lambda: onboarding_reconfigure_active_schema(
                 schema_name=schema_name or None,
                 schema_path=schema_path or None,
+                dry_run=dry_run,
             ),
         ))
 
     @mcp.tool()
-    def set_taxonomy_path(path: str) -> str:
+    def set_taxonomy_path(path: str, dry_run: bool = False) -> str:
         """Update the taxonomy file path persisted in config.toml.
 
         The taxonomy informs the model's interpretation of task
@@ -775,22 +783,33 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         the tool refuses non-existent or directory targets to prevent
         silently disabling taxonomy awareness.
 
+        Set ``dry_run=true`` to validate the path and preview the
+        config write without touching ``config.toml``. Returns
+        code="dry_run" per ADR 14.
+
         Takes effect on next MCP server restart. Available at
         CONTRIBUTOR level (informational input, not a capability).
         """
         return json.dumps(_audit_call(
-            reg, "set_taxonomy_path", {"path": path},
-            lambda: onboarding_reconfigure_taxonomy_path(path),
+            reg, "set_taxonomy_path", {"path": path, "dry_run": dry_run},
+            lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
         ))
 
     @mcp.tool()
-    def set_role(target_role: str) -> str:
+    def set_role(target_role: str, dry_run: bool = False) -> str:
         """Change the persisted MCP role — DOWNGRADE ONLY.
 
         Valid roles: CONTRIBUTOR, GENERATOR, MANAGER (cumulative;
         see ADR 5). This tool will set the persisted role to
         ``target_role`` IF AND ONLY IF its level is less than or
         equal to the currently-loaded role.
+
+        Set ``dry_run=true`` to validate inputs (including the
+        elevation refusal check) and preview the config write without
+        touching ``config.toml``. Refusal-class errors
+        (role_elevation_forbidden) trigger regardless of dry_run — a
+        forbidden elevation is forbidden whether or not the LLM was
+        just "asking". Returns code="dry_run" on legitimate previews.
 
         Self-elevation via MCP is forbidden by design (ADR 17).
         Attempts to elevate return a structured error with
@@ -801,12 +820,17 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Takes effect on next MCP server restart.
         """
-        params = {"target_role": target_role, "current_role": reg.config.role}
+        params = {
+            "target_role": target_role,
+            "current_role": reg.config.role,
+            "dry_run": dry_run,
+        }
         return json.dumps(_audit_call(
             reg, "set_role", params,
             lambda: onboarding_reconfigure_role(
                 current_role=reg.config.role,
                 target_role=target_role,
+                dry_run=dry_run,
             ),
         ))
 

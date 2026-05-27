@@ -132,7 +132,7 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_taxonomy_path",
-        lambda _path: {"success": True, "code": "ok"},
+        lambda _path, **_kw: {"success": True, "code": "ok"},
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_role",
@@ -185,7 +185,7 @@ def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.M
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_taxonomy_path",
-        lambda _path: {"success": True, "code": "ok"},
+        lambda _path, **_kw: {"success": True, "code": "ok"},
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_role",

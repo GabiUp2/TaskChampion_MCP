@@ -968,11 +968,17 @@ _ROLE_ELEVATION_FORBIDDEN_CODE = "role_elevation_forbidden"
 def reconfigure_active_schema(
     schema_name: str | None = None,
     schema_path: str | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Switch the active schema by updating ``config.toml``.
 
     Exactly one of ``schema_name`` (a bundled preset) or ``schema_path``
     (a file path to a custom schema TOML) must be provided.
+
+    When ``dry_run=True``: validate all inputs (preset name exists, schema
+    file exists, etc.) and return a preview describing what *would* be
+    written, but do not touch ``config.toml``.  Returns ``code="dry_run"``
+    per ADR 14.
 
     Does not mutate Taskwarrior tasks.  Server restart required to apply
     (runtime reload is not yet implemented).
@@ -1003,6 +1009,22 @@ def reconfigure_active_schema(
                 ),
                 "available_presets": sorted(known),
             }
+        if dry_run:
+            return {
+                "success": True,
+                "code": "dry_run",
+                "schema_name": schema_name,
+                "schema_path": None,
+                "restart_required": True,
+                "preview": {
+                    "would_write": {"schema": schema_name},
+                    "would_clear": "schema_path",
+                },
+                "message": (
+                    f"DRY RUN: would set [server].schema = '{schema_name}' "
+                    "and clear any existing schema_path. No file written."
+                ),
+            }
         cfg_path = upsert_server_config(
             schema_name=schema_name,
             clear_schema_path=True,
@@ -1026,6 +1048,19 @@ def reconfigure_active_schema(
             "error": True,
             "message": f"Schema file not found: {resolved}",
         }
+    if dry_run:
+        return {
+            "success": True,
+            "code": "dry_run",
+            "schema_name": None,
+            "schema_path": str(resolved),
+            "restart_required": True,
+            "preview": {"would_write": {"schema_path": str(resolved)}},
+            "message": (
+                f"DRY RUN: would set [server].schema_path = '{resolved}'. "
+                "No file written."
+            ),
+        }
     cfg_path = upsert_server_config(schema_path=str(resolved))
     return {
         "success": True,
@@ -1039,12 +1074,15 @@ def reconfigure_active_schema(
     }
 
 
-def reconfigure_taxonomy_path(path: str) -> dict[str, Any]:
+def reconfigure_taxonomy_path(path: str, dry_run: bool = False) -> dict[str, Any]:
     """Update the ``taxonomy_path`` entry in ``config.toml``.
 
     Validates that the target file exists before persisting.  The taxonomy
     file influences how the model interprets task semantics; pointing it at
     a non-existent path would silently disable taxonomy awareness.
+
+    When ``dry_run=True``: run all validation, return a preview, but do not
+    write ``config.toml``.  Returns ``code="dry_run"`` per ADR 14.
     """
     if not path or not path.strip():
         return {"error": True, "message": "path must be a non-empty string."}
@@ -1059,6 +1097,19 @@ def reconfigure_taxonomy_path(path: str) -> dict[str, Any]:
         return {
             "error": True,
             "message": f"Taxonomy path is not a regular file: {resolved}",
+        }
+
+    if dry_run:
+        return {
+            "success": True,
+            "code": "dry_run",
+            "taxonomy_path": str(resolved),
+            "restart_required": True,
+            "preview": {"would_write": {"taxonomy_path": str(resolved)}},
+            "message": (
+                f"DRY RUN: would set [server].taxonomy_path = '{resolved}'. "
+                "No file written."
+            ),
         }
 
     cfg_path = upsert_server_config(taxonomy_path=str(resolved))
@@ -1077,6 +1128,7 @@ def reconfigure_taxonomy_path(path: str) -> dict[str, Any]:
 def reconfigure_role(
     current_role: str,
     target_role: str,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Change the persisted role — downgrade only.
 
@@ -1087,6 +1139,13 @@ def reconfigure_role(
 
     A no-op (target == current) succeeds and returns ``success=True`` so
     the tool is idempotent for clients that re-issue on transient failures.
+
+    When ``dry_run=True``: run all validation (including the elevation
+    refusal check) and return a preview, but do not write ``config.toml``.
+    Returns ``code="dry_run"`` on success per ADR 14.  Refusal-class
+    errors (role_elevation_forbidden) trigger regardless of dry_run — a
+    forbidden elevation is forbidden whether or not the LLM was just
+    "asking".
     """
     try:
         target = Role.validate(target_role)
@@ -1113,6 +1172,20 @@ def reconfigure_role(
                 "To elevate, run './dev.sh init --role <ROLE>' from a "
                 "shell, or hand-edit ~/.config/taskchampion-mcp/config.toml "
                 "and restart the MCP server."
+            ),
+        }
+
+    if dry_run:
+        return {
+            "success": True,
+            "code": "dry_run",
+            "previous_role": current_validated,
+            "new_role": target,
+            "restart_required": True,
+            "preview": {"would_write": {"role": target}},
+            "message": (
+                f"DRY RUN: would set [server].role = '{target}' "
+                f"(downgrade from {current_validated}). No file written."
             ),
         }
 
