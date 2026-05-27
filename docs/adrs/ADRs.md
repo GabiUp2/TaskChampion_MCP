@@ -816,6 +816,11 @@ Versions 0.x.y leading up to v1.0 follow normal SemVer with the relaxed conventi
 **Status:** Proposed
 **Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
 
+> **Note on numbering:** ADR 18 (Installation Strategy) was originally drafted as a
+> second ADR 16 due to a merge-time collision and renumbered in v0.3.2 to remove
+> the ambiguity. Every "ADR 16" reference in the codebase now unambiguously means
+> *this* document — Configuration Precedence.
+
 ## Context
 
 Today `load_config()` reads a single TOML file at `~/.config/taskchampion-mcp/config.toml` (per ADR 6) and falls back to dataclass defaults. The roadmap calls for project-scoped configuration (`.taskchampion-mcp.toml` in the project root) and CI/automation users need a way to override settings without editing files. Without a documented precedence order, behavior becomes "wherever the developer happened to read first," which is exactly the class of bug ADR documentation is meant to prevent.
@@ -880,11 +885,17 @@ This is the diagnostic tool of first resort when a user reports "I changed the c
 
 ---
 
-# ADR 16: Installation Strategy — dev.sh vs Published Distribution
+# ADR 18: Installation Strategy — dev.sh vs Published Distribution
 
 **Date:** 2026-05-26
 **Status:** Accepted
 **Author:** Claude Sonnet 4.6 / Cowork (bartosz.wichowski@dxc.com)
+
+> **Note on numbering:** Originally drafted as a second ADR 16 due to a
+> merge-time collision with the Configuration Precedence ADR. Renumbered to
+> ADR 18 in v0.3.2 to remove the ambiguity. Historical commits prior to v0.3.2
+> may reference "ADR 16: Installation Strategy" — those references mean *this*
+> document.
 
 ## Context
 

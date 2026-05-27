@@ -647,7 +647,7 @@ action_install() {
     # For end-user installation see: https://github.com/GabiUp2/TaskChampion_MCP
     # The published path is:  uvx taskchampion-mcp          (Linux / macOS)
     #                         wsl.exe bash -lc "uvx taskchampion-mcp"  (WSL)
-    # See ADR 16 for the full rationale.
+    # See ADR 18 for the full rationale.
     # -------------------------------------------------------------------------
 
     # Short-circuit: claude-code uses `claude mcp add` (CLI), not a JSON config
@@ -1124,7 +1124,7 @@ action_smoke_test() {
     # Run the MCP protocol smoke test: start the server, handshake, assert tool surface.
     # This is the automated gate for the published distribution path — it validates that
     # the server speaks correct MCP without requiring a running Claude Desktop instance.
-    # See ADR 16 and tests/smoke_test_mcp.py for rationale.
+    # See ADR 18 and tests/smoke_test_mcp.py for rationale.
     _ensure_venv
     info "Running MCP protocol smoke test..."
     "$VENV_DIR/bin/python" tests/smoke_test_mcp.py
