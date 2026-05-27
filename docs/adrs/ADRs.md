@@ -1246,3 +1246,234 @@ Key design choices:
 - `scripts/MESSAGE_TO_WINTERMUTE.md` — agent-facing setup brief shipped alongside the script.
 
 
+# ADR 21: Hybrid Tool Visibility — Decomposed into ADRs 21a, 21b, 21c
+
+**Date:** 2026-05-27
+**Status:** Superseded by ADRs 21a, 21b, 21c (this file)
+**Author:** gabiup2 / Codex 5.3 via Cursor (original draft); decomposition by gabiup2 / Claude Opus 4.7 via Cowork
+
+## Why this entry was decomposed
+
+The original ADR 21 bundled three structurally independent decisions under one umbrella ("Hybrid Tool Visibility"):
+
+1. A runtime capability introspection tool (additive; no protocol dependency).
+2. Opt-in `notifications/tools/list_changed` emission to narrow the visible tool surface when the client supports it.
+3. Authorisation-scoped `tools/list` filtering tied to per-request authorisation contexts.
+
+Each item has a different risk profile, different pre-requisites, and a different point in the release timeline where it pays off. Bundling them produced a six-criterion implementation contract that could not ship as a single PR, and obscured which trade-offs came from which mechanism. A v0.3.2 review (see PR #5 review thread) recommended splitting them. This entry is preserved as the historical context; the three sub-decisions live below as ADR 21a / 21b / 21c.
+
+The original Context section is still valid as the framing for *why* tool-surface visibility matters at all — see the verbatim copy in ADR 21a's Context.
+
+## Cross-references
+
+- [ADR 21a — Runtime Capability Introspection Tool](#adr-21a-runtime-capability-introspection-tool)
+- [ADR 21b — Opt-in `tools/list_changed` Narrowing on Capable Clients](#adr-21b-opt-in-toolslist_changed-narrowing-on-capable-clients)
+- [ADR 21c — Authorisation-Scoped `tools/list` Filtering](#adr-21c-authorisation-scoped-toolslist-filtering)
+
+---
+
+# ADR 21a: Runtime Capability Introspection Tool
+
+**Date:** 2026-05-28
+**Status:** Proposed (ready for v0.4.0 once ADR 19 lands)
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+ADR 19 chose stable tool registration plus runtime gates for cross-client safety. Net effect: an LLM connecting to the MCP sees the full tool surface (about 23 tools at v0.3.2) regardless of whether the server is in onboarding mode or post-onboarding mode. Inapplicable tools return structured refusals (per ADR 14), but the LLM still has to probe them to discover the gate.
+
+Two scenarios produce real cost:
+
+1. **First-call selection.** An LLM scanning the tool surface for "what should I do here" has to weigh ~23 candidates. Some clients/models handle large surfaces well; some don't. Without telemetry we cannot quantify the cost precisely, but the noise floor is non-zero.
+2. **Recovery after refusal.** When a tool returns `code: "schema_unset"` or `code: "role_elevation_forbidden"`, the LLM needs to map back to "what tools *would* work right now" — currently inferable only from the refusal text or via human-readable instructions in the server banner.
+
+An additive, low-risk fix: a single read-only MCP tool that returns the server's effective state — what mode, what role, what tool groups are callable. The LLM can call it first, route accordingly, and never probe an inapplicable tool.
+
+## Decision
+
+Add one new MCP tool, name `get_runtime_capabilities` (placeholder; final name TBD during implementation if a better one surfaces).
+
+Returned envelope (illustrative — exact shape settled in the implementing PR):
+
+```json
+{
+  "success": true,
+  "code": "ok",
+  "mode": "onboarding | initialised",
+  "role": "CONTRIBUTOR | GENERATOR | MANAGER",
+  "schema": { "name": "minimal", "version": "1.0.0", "loaded": true },
+  "taxonomy_path": "/home/.../TAXONOMY.md" | null,
+  "integrations": {
+    "timewarrior": true,
+    "claude_code": true
+  },
+  "callable_tool_groups": [
+    "onboarding"
+  ],
+  "uncallable_tool_groups": [
+    "contributor", "generator", "manager", "reconfigure"
+  ],
+  "uncallable_reason": "schema_unset"
+}
+```
+
+The tool is registered at CONTRIBUTOR level (informational only — no capability granted), runs through the standard `_audit_call` rate-limit + audit-log path, supports `dry_run` only nominally (it's already non-mutating), and does not emit any `tools/list_changed` notification.
+
+## Alternatives Considered
+
+- **Bake the same information into `get_initialization_status`.** Already exists, already surfaces some of this — but it's onboarding-centric and only returns useful state when the server is in onboarding mode. After onboarding completes, `get_initialization_status` becomes uninteresting. A separate tool for "what can I do RIGHT NOW" is clearer than overloading the onboarding tool.
+- **Use the MCP `instructions` field on connect.** Already partially used for this (server banner mentions role + schema). Static — does not update after `reload_configuration`. Insufficient as the only signal.
+- **Skip this tool and rely on refusal envelopes.** The status quo per ADR 19. Acceptable for users who don't mind the probing tax; insufficient once we have data showing the tax is real.
+
+## Consequences
+
+### Pros
+
+- Standalone, additive, no protocol dependency. Works on every MCP client today.
+- Independent of ADR 21b (dynamic narrowing) and ADR 21c (auth scoping). Delivers most of the discoverability win on its own.
+- Cheap to implement: a single read-only tool reusing the shared `_audit_call` envelope and the existing `requires_onboarding` predicate.
+- Measurable: once shipped, we can instrument `tools-tried-before-first-success` and see whether LLMs that call this first do meaningfully better than those that don't.
+- Provides the baseline for ADR 21b — the LLM-visible "what changed" signal that lets a capable client decide whether to re-fetch `tools/list`.
+
+### Cons
+
+- One more tool in the surface. Mild irony for an ADR aimed at reducing surface clutter, but the tool is *summary* not *capability* — its job is to make the rest of the surface navigable.
+- Information duplication between this tool and the existing `get_initialization_status` / `get_schema_info`. Resolved by documentation: this is the "current snapshot" tool; the others are domain-specific deep dives.
+
+## Implementation acceptance criteria
+
+A patch implementing this ADR is complete when:
+
+1. `get_runtime_capabilities` is registered as a CONTRIBUTOR-level tool and is callable in both onboarding-mode and post-onboarding-mode.
+2. The response distinguishes `callable_tool_groups` from `uncallable_tool_groups` with a per-group `uncallable_reason` aligned to ADR 14's `code` taxonomy.
+3. The call goes through `_audit_call` and produces a standard audit envelope per ADR 13.
+4. The smoke test scenarios from v0.3.2 (`onboarding`, `post_onboarding`) include an assertion that `get_runtime_capabilities` returns the expected mode/role per scenario.
+5. Coverage gate stays ≥ 85 % per ADR 12.
+
+## Cross-references
+
+- ADR 13 — Audit log envelope (the introspection call lands here)
+- ADR 14 — Error model (`uncallable_reason` values reuse the closed-set codes)
+- ADR 17 — Role-elevation asymmetry (the role surfaced here is the *currently loaded* role; mutations remain governed by `set_role` semantics)
+- ADR 19 — Runtime reload (this tool reflects the reloaded state if/when reload lands)
+- ADR 21 — Original umbrella entry that decomposed into 21a/21b/21c
+
+---
+
+# ADR 21b: Opt-in `tools/list_changed` Narrowing on Capable Clients
+
+**Date:** 2026-05-28
+**Status:** Deferred — pending real-world data on the discoverability problem after ADR 19 + ADR 21a ship
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+MCP protocol supports two related signals for dynamic tool visibility: a server-side `tools.listChanged = true` capability declaration, and a `notifications/tools/list_changed` server-emitted notification. When both client and server honour them, the client refetches `tools/list` and sees a narrowed surface.
+
+ADR 19 explicitly chose not to rely on these as the primary mechanism because client support varies. ADR 21a delivers the introspection-tool route to the same discoverability win without protocol-level work. This ADR (21b) asks: once the introspection tool ships, is the residual visibility tax big enough to justify also emitting `tools/list_changed`?
+
+The honest answer is: we don't know yet. The decision should be made on data, not on aesthetics.
+
+## Decision
+
+**Defer.** No implementation in v0.4.0 or v1.0.0. Reopen when at least two of the following are true:
+
+1. ADR 19 (runtime reload) has shipped to real users for at least one minor release.
+2. ADR 21a has shipped and we have telemetry on `tools-tried-before-first-success`.
+3. Field reports from users running TaskChampion MCP under capable clients (Claude Desktop, Windsurf, Cursor, Neovim) show measurable noise impact on LLM tool selection.
+
+When the decision is reopened, the implementation should:
+
+1. Declare `tools.listChanged = true` only when the SDK and runtime can emit notifications reliably.
+2. Emit `notifications/tools/list_changed` on the same events that ADR 19's `reload_configuration` flushes — onboarding completion, role change, explicit reload.
+3. Preserve ADR 19's compatibility-first baseline: clients that ignore the notification still see correct behaviour because the underlying tool registration and runtime gates do not change.
+4. Document the audit-log divergence: a capable client that never sees a refused tool produces no refusal audit entries, while a blind client does. Either accept this and update ADR 13's query patterns, or emit a "would-have-been-called" audit entry on the server side when the surface narrows.
+
+## Alternatives Considered
+
+- **Ship 21b alongside 21a in v0.4.0.** Front-loads complexity into an unrealised baseline (ADR 19 itself is still Proposed). Pushes the implementation contract to two interacting mechanisms when one might be enough. Rejected.
+- **Refuse the mechanism permanently.** Locks us out of a legitimate protocol feature on the chance we don't need it. Rejected; deferral keeps the door open.
+- **Implement it as opt-in via a config flag (`tc_mcp_emit_list_changed = true`).** Possible, but ships the complexity and creates a forking client-experience surface. Not until we have data.
+
+## Consequences
+
+### Pros (of deferring)
+
+- ADR 19 + ADR 21a together likely cover ≥ 80 % of the discoverability problem. Shipping 21b on top adds compounding complexity for uncertain marginal benefit.
+- Buys time to instrument and measure. ADR-design quality on a hypothetical problem is poor; on a measured one is much better.
+- Keeps v0.4.0 scope tight (`runtime stability + discoverability`).
+
+### Cons (of deferring)
+
+- LLM-side selection noise persists until 21b lands or until 21a is sufficient on its own. If 21a is insufficient, users notice the gap before we do.
+- The audit-log divergence question (Cons #5 in the v0.3.2 review of ADR 21) stays open. When 21b is reopened, this is the first thing to nail down.
+
+## When to reopen
+
+When `tools-tried-before-first-success` median on a fixed prompt corpus on at least one of the four v1.0 targets (Claude Desktop / Windsurf / Cursor / Neovim) exceeds an as-yet-undefined threshold — or, more pragmatically, when a user files an issue saying "this MCP is noisy and that's costing me model latency". Whichever comes first.
+
+## Cross-references
+
+- ADR 13 — Audit log envelope (the audit-divergence issue lives here)
+- ADR 19 — Runtime reload (the events 21b would notify on)
+- ADR 21a — Introspection tool (the cheaper alternative shipped first)
+
+---
+
+# ADR 21c: Authorisation-Scoped `tools/list` Filtering
+
+**Date:** 2026-05-28
+**Status:** Deferred to v1.x — depends on HTTP/SSE transport, which is itself deferred past v1.0 per the v0.3.2 roadmap re-scope
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+The original ADR 21 proposed that `tools/list` could return different tool sets based on the request's authorisation context. The phrase was "deterministic per authorisation class".
+
+For TaskChampion MCP's current and v1.0 transport (stdio, per ADR 3 and ADR 15), this concept does not apply. Stdio gives the server one process, one config, one role — set at startup, valid for the life of the process. There is no per-request authorisation context. Two clients connecting to the same stdio server would necessarily be two different server processes with two different configs.
+
+The only way "authorisation-scoped tools/list" becomes a real concept is when the server accepts multiple authenticated connections — i.e. the HTTP/SSE transport (originally scheduled for v0.4.0, now deferred past v1.0 per the v0.3.2 roadmap re-scope).
+
+## Decision
+
+**Defer to v1.x post-release.** This ADR is recorded for forward compatibility — when HTTP/SSE transport implementation begins, it should reference this ADR as the design constraint for how the transport handles `tools/list` per connection.
+
+Specifically, when implementation begins:
+
+1. Define what "authorisation class" means in concrete terms. Likely a tuple of `(authenticated principal, role-claim, schema-claim)` extracted from the transport-level auth.
+2. Specify the determinism contract precisely:
+   - Same principal + same server state → same `tools/list` output.
+   - Different principals on the same server → potentially different `tools/list`.
+   - Determinism is per `(principal, state)` pair, not server-wide.
+3. Reconcile with ADR 13's audit log: a tool the user never sees should still produce a discoverable trail if a different user *did* see it under the same server state.
+4. Reconcile with ADR 19: the runtime-gate behaviour stays; auth-scoping narrows the registered set further but never widens it.
+
+## Alternatives Considered
+
+- **Ship a stdio-side approximation now (`register only role-applicable tools at startup`).** Not what the original ADR 21 was about, but a related and simpler win. Captured in ADR 19's existing implementation criteria (item 3: "different registrations for onboarding-mode vs post-onboarding-mode"). Treated as an ADR 19 detail, not as ADR 21c's job.
+- **Speculate the design now.** Premature. Without the HTTP/SSE transport's auth model nailed down, every concrete choice here is guesswork.
+
+## Consequences
+
+### Pros (of deferring)
+
+- Avoids over-specifying a mechanism whose semantics depend on a transport we don't have.
+- Keeps the v0.4.0 and v1.0.0 scopes tight: stdio only, single-role per process, no per-request auth.
+- When HTTP/SSE work begins, the auth-scoping question lands at the same time as the auth-extraction question — they're naturally coupled.
+
+### Cons (of deferring)
+
+- Multi-tenant hosted deployments (`docs/manuals/hosted-deployment.md`, currently a v0.4.0 TODO) cannot ship without this. Acceptable because the hosted-deployment guide is itself v1.x work now.
+- Forward-compatibility commitment: any decisions made for stdio's `tools/list` behaviour need to leave room for per-connection variation later. Concretely, the current "register all tools" pattern is fine; "register only the configured role's tools" would also be fine; neither precludes ADR 21c.
+
+## When to reopen
+
+When HTTP/SSE transport implementation begins (v1.x), as part of the auth/connection design — not before.
+
+## Cross-references
+
+- ADR 3 — stdio transport (current, single-role-per-process)
+- ADR 13 — Audit log envelope (the "tool the user never saw" question)
+- ADR 15 — Versioning and multi-transport milestone (HTTP/SSE deferred past v1.0)
+- ADR 19 — Runtime reload (the registration set 21c would further narrow)
+- ADR 21a — Introspection tool (the alternative discoverability mechanism that ships first)

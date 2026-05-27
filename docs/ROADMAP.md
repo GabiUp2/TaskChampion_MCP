@@ -1,12 +1,12 @@
 # Feature Roadmap
 
-> **North-star milestone — v1.0**: TaskChampion MCP is installed and feature-symmetric across all seven target IDEs/hosts (Neovim, Cursor, Windsurf, VS Code, Claude Desktop, ChatGPT, Codex). Both stdio and HTTP/SSE transports supported. Per ADR 15.
+> **North-star milestone — v1.0**: TaskChampion MCP is installed and feature-symmetric across the **four primary stdio targets** — Claude Desktop, Windsurf, Cursor, Neovim. HTTP/SSE transport and the second-class targets (VS Code, ChatGPT, Codex) are deferred to v1.x post-release. This narrowing of v1.0 scope was decided on 2026-05-28 to make v1.0 an achievable polish-and-stabilise milestone for the targets actually in daily use, rather than a feature-completeness gate for every conceivable MCP host.
 
 This roadmap is organized around three release tracks:
 
 - **v0.x (Foundation)** — ship a usable stdio MCP server and feedback-driven iterations
-- **v1.0 (Multi-target Release)** — symmetric UX on all seven targets, both transports, all release gates met
-- **v1.x+ (Post-release)** — workflow features, ecosystem integrations, second-class targets
+- **v1.0 (Four-target stdio release)** — symmetric UX on Claude Desktop, Windsurf, Cursor, Neovim; stdio only; all release gates met
+- **v1.x+ (Platform expansion + workflow features)** — HTTP/SSE transport, VS Code, ChatGPT, Codex, deferred ADRs (21b/21c), workflow features
 
 ---
 
@@ -212,9 +212,129 @@ that lets users change schema/taxonomy/role mid-flight (downgrade only).
 
 ---
 
-## v0.4.0 — HTTP/SSE transport and auth
+## v0.4.0 — v1.0 prep: runtime stability + discoverability
 
-**Theme**: Add the second transport so ChatGPT and Codex become reachable. Stays pre-1.0 until target compatibility is verified.
+**Theme**: This is the v1.0-readiness release for the four primary stdio targets (Claude Desktop, Windsurf, Cursor, Neovim). Ships the runtime-reload mechanism that ADR 19 specifies and the introspection tool from ADR 21a; defers transport expansion to v1.x.
+
+**Why the rescope**: v0.4.0 was originally scoped as "HTTP/SSE transport and auth" to make ChatGPT and Codex reachable. We're moving HTTP/SSE and those two targets past v1.0 (see the new v1.x section) because (a) the four primary stdio targets cover the actual daily-use stack, (b) ADR 19's runtime reload is a much higher-value v1.0 prerequisite than a second transport, and (c) ChatGPT/Codex support without HTTP/SSE wins us nothing. v1.0 becomes "polish the four targets we use"; the second transport gets a clean v1.x release of its own.
+
+### Runtime reload (ADR 19 implementation)
+
+- [ ] Refactor server tool registration so registration is decoupled from operational state — all tool categories register at startup; runtime checks gate execution
+- [ ] Add per-tool runtime gates returning structured `code: "schema_unset"` / role-refusal envelopes per ADR 14
+- [ ] Implement `reload_configuration` MCP tool at CONTRIBUTOR level — re-reads `config.toml`, reloads schema, refreshes rate limiter / audit logger / CLI wrappers
+- [ ] `save_initial_schema` and `use_preset_schema` trigger in-process reload on success — no IDE restart needed for onboarding completion
+- [ ] Same applies to `set_active_schema` / `set_taxonomy_path` / `set_role` (the ADR 17 reconfigure tools)
+- [ ] Tests cover: stale state before initialisation, immediate post-onboarding visibility, explicit reload after hand-edit, role gating still enforced, Timewarrior-absent fallback
+- [ ] Smoke-test scenarios collapse: `tools/list` returns the same set in onboarding-mode and post-onboarding-mode (the difference is now per-tool runtime behaviour, not registration)
+- [ ] Promote ADR 19 from `Proposed` → `Accepted` once acceptance criteria are met
+
+### Discoverability (ADR 21a implementation)
+
+- [ ] Implement `get_runtime_capabilities` MCP tool at CONTRIBUTOR level — returns current mode, role, schema state, integration flags, callable tool groups
+- [ ] Routes through the shared `_audit_call` envelope so it is rate-limited + audit-logged identically to other tools
+- [ ] Per-scenario smoke-test assertion: returns the correct mode/role/tool-groups in `onboarding` and `post_onboarding` scenarios
+- [ ] Document the recommended "call `get_runtime_capabilities` first" pattern in `docs/manuals/` for LLMs and downstream tooling
+
+### Carry-overs from v0.3.2
+
+- [ ] Confirmation flow design decision for `set_role` downgrades (audit finding #7)
+- [ ] `config.example.toml` mention of the post-onboarding reconfigure tool surface (audit finding #10)
+
+### Out of scope — explicitly deferred to v1.x
+
+- ADR 21b (dynamic `tools/list_changed` narrowing) — pending real-world data on whether ADR 21a is sufficient
+- ADR 21c (auth-scoped `tools/list`) — depends on HTTP/SSE transport
+- HTTP/SSE transport, token auth, CIDR allowlist, health endpoint, OpenAPI spec, ChatGPT/Codex/VS Code support
+
+---
+
+## v1.0.0 — Four-target stdio release
+
+**Theme**: Polish-and-lock release for the four targets actually in daily use. All stdio; HTTP/SSE and the platforms requiring it are v1.x work. Per the revised ADR 15 scope (which itself needs an amendment ADR to record this re-scope — see v0.4.0 deliverables).
+
+### v1.0 release gates
+
+1. [ ] stdio transport stable and validated across the four target hosts (no second transport gate for v1.0)
+2. [ ] **All four primary targets** pass the v1.0 acceptance matrix (below): Claude Desktop, Windsurf, Cursor, Neovim
+3. [ ] Runtime reload (ADR 19) implemented and acceptance-tested (delivered in v0.4.0)
+4. [ ] Tool surface normalised (v0.3.0 breaking changes complete — already done)
+5. [ ] Error model implemented (ADR 14, including `role_elevation_forbidden` from v0.3.2)
+6. [ ] Config precedence implemented (ADR 16)
+7. [ ] Published to PyPI and Official MCP Registry
+8. [ ] All ADR 9 security features verified; security regression corpus green; onboarding + reconfigure tools have full audit-log + rate-limit + dry-run coverage (delivered in v0.3.2)
+9. [ ] Per-target installation guide, configuration reference, schema authoring guide, security model
+10. [ ] CHANGELOG spans 0.x → 1.0 with migration notes for every breaking change
+11. [ ] ADR amendment recording the v1.0 scope narrowing (the four-targets-stdio decision) and the v1.x deferrals
+
+### Target compatibility matrix (v1.0 scope)
+
+Cells marked `✓` are required for v1.0; `~` means partial / manual.
+
+| Feature | Claude Desktop | Windsurf | Cursor | Neovim |
+|---|:-:|:-:|:-:|:-:|
+| Transport: stdio | ✓ | ✓ | ✓ | ✓ |
+| All CONTRIBUTOR tools | ✓ | ✓ | ✓ | ✓ |
+| All GENERATOR tools | ✓ | ✓ | ✓ | ✓ |
+| All MANAGER tools | ✓ | ✓ | ✓ | ✓ |
+| Reconfigure tools (ADR 17) | ✓ | ✓ | ✓ | ✓ |
+| Runtime reload (ADR 19) | ✓ | ✓ | ✓ | ✓ |
+| Capability introspection (ADR 21a) | ✓ | ✓ | ✓ | ✓ |
+| Schema preset loading | ✓ | ✓ | ✓ | ✓ |
+| Onboarding flow (`get_initialization_status` → `save_initial_schema`) | ✓ | ✓ | ✓ | ✓ |
+| Timewarrior tools (if installed) | ✓ | ✓ | ✓ | ✓ |
+| Rate limiting | ✓ | ✓ | ✓ | ✓ |
+| Audit log written | ✓ | ✓ | ✓ | ✓ |
+| Dry-run / confirmation flow | ✓ | ✓ | ✓ | ✓ |
+| Sensitive field redaction | ✓ | ✓ | ✓ | ✓ |
+| Per-target install guide | ✓ | ✓ | ✓ | ✓ |
+| Headless e2e automation | ~ | ✓ | ✓ | ✓ |
+
+> `~` for Claude Desktop e2e because it cannot be driven headlessly today. The v1.0 gate accepts a manual checklist plus a recorded transcript as evidence.
+> Neovim coverage assumes Claude Code (`claude` CLI) is the in-editor runner, per ADR 18 and the `dev.sh install claude-code` target shipped in v0.3.0.
+
+### Per-target acceptance test (ADR 12, layer 3)
+
+Each target's `tests/targets/<target>/` runs the same script and reports per-feature pass/fail. The acceptance suite — identical across targets — is:
+
+1. Server starts, advertises the expected role's tool set
+2. `get_initialization_status` returns valid JSON
+3. `get_runtime_capabilities` returns mode + role + callable tool groups for the current state (ADR 21a)
+4. `list_preset_schemas` returns at least the five bundled presets
+5. Onboarding round-trip: `analyze_existing_tasks_for_schema` → `generate_initial_schema_preview` → `save_initial_schema` (using a temp output path)
+6. Runtime reload round-trip: hand-edit `config.toml`, call `reload_configuration`, observe the updated state without restart (ADR 19)
+7. Reconfigure round-trip: `set_active_schema(schema_name="...")` + restart-free verification via `get_schema_info`
+8. `list_tasks` with empty and non-empty filters
+9. `get_task` for a known UUID
+10. `search_tasks` across `description`, `project`, `tags`, UDA
+11. `annotate_task` against a real task; verify via `get_task`
+12. `modify_task` of one built-in and one UDA field; verify
+13. `start_task` → `stop_task`; verify Timewarrior status if available
+14. `get_projects`, `get_tags`, `get_active_context`, `get_schema_info`
+15. GENERATOR-only: `create_task` minimal; `create_task` with full UDA payload; `create_subtask`; `batch_create_tasks`
+16. CONTRIBUTOR: `get_task_report` returns a known Taskwarrior report
+17. MANAGER-only: `complete_task` with `dry_run=true` (expect `code: "dry_run"`)
+18. MANAGER-only: `delete_task` with `dry_run=true` (expect `code: "dry_run"`)
+19. MANAGER-only: `undo_last_action` after a real modification
+20. MANAGER-only: `sync_tasks` against a configured TaskChampion sync server (skipped if unconfigured)
+21. MANAGER-only: `bulk_modify` with filter + `dry_run=true`
+22. Rate limiter triggers at configured threshold; returns `code: "rate_limit"`
+23. ADR 17: `set_role("MANAGER")` from a CONTRIBUTOR returns `error_code: "role_elevation_forbidden"`
+24. Audit log entry written for every call above; entries parseable as JSON Lines with stable schema (ADR 13), including the new tools introduced in v0.3.x (reconfigure, `get_task_report`, `batch_create_tasks`, `bulk_modify`, `get_runtime_capabilities`)
+25. Confirmation flow on a MANAGER lifecycle tool: first call → `code: "confirmation_required"`, second call → success
+26. Sensitive field in `config.redacted_fields` is absent from both tool return and audit log entry
+
+A target that fails any of items 1–26 blocks the v1.0 release for that target. Failure of items 1–24 across any target blocks the v1.0 release globally. Items 25–26 are per-target evidence requirements; items 1–24 are functional gates.
+
+---
+
+## v1.x — Platform expansion (post-1.0)
+
+**Theme**: Ship the second transport and the targets that need it. Each item is its own minor release (v1.1, v1.2, …) with its own ADR amendment trail; this section is the staging area.
+
+### HTTP/SSE transport + auth
+
+The original v0.4.0 scope, deferred wholesale because v1.0 covers the targets we actually use and HTTP/SSE has no user without ChatGPT/Codex.
 
 - [ ] Streamable HTTP transport via the upstream `mcp` SDK
 - [ ] SSE transport for real-time progress events
@@ -223,83 +343,23 @@ that lets users change schema/taxonomy/role mid-flight (downgrade only).
 - [ ] Health endpoint (`GET /health`) for orchestration
 - [ ] Hosted deployment guide (`docs/manuals/hosted-deployment.md`)
 - [ ] OpenAPI spec generated from tool registry for ChatGPT plugin compatibility
-- [ ] Codex MCP support documented
+- [ ] ADR amendment formalising the HTTP/SSE auth model
 
----
+### Targets unlocked by HTTP/SSE
 
-## v1.0.0 — Multi-target release
+- [ ] ChatGPT MCP support documented and acceptance-tested
+- [ ] Codex MCP support documented and acceptance-tested
 
-**Theme**: Per ADR 15, this is the gated release. All ten v1.0 gates must be green.
+### Other deferred targets
 
-### v1.0 release gates
+- [ ] VS Code (Copilot MCP) — stdio target, but v1.0 scope narrowed to the four primary; bring online once those four are locked
 
-1. [ ] Both transports supported (stdio + HTTP/SSE)
-2. [ ] All seven targets pass the v1.0 acceptance matrix (below)
-3. [ ] HTTP/SSE auth story documented and verified
-4. [ ] Tool surface normalized (v0.3.0 breaking changes complete)
-5. [ ] Error model implemented (ADR 14)
-6. [ ] Config precedence implemented (ADR 16)
-7. [ ] Published to PyPI and Official MCP Registry
-8. [ ] All ADR 9 security features verified; security regression corpus green
-9. [ ] Per-target installation guide, configuration reference, schema authoring guide, security model
-10. [ ] CHANGELOG spans 0.x → 1.0 with migration notes for every breaking change
+### Deferred ADR 21 mechanisms
 
-### Target compatibility matrix
+- [ ] ADR 21b — `notifications/tools/list_changed` narrowing on capable clients (decide on data once ADR 19 + ADR 21a have shipped)
+- [ ] ADR 21c — Authorisation-scoped `tools/list` (tied to HTTP/SSE transport auth model)
 
-Each target must support the same feature set ("symmetric UX"). Cells marked `✓` are required for v1.0; `~` means partial / manual; `✗` means deferred to v1.x.
-
-| Feature | Neovim | Cursor | Windsurf | VS Code | Claude Desktop | ChatGPT | Codex |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Transport: stdio | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
-| Transport: HTTP/SSE | — | — | — | — | — | ✓ | ✓ |
-| All CONTRIBUTOR tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| All GENERATOR tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| All MANAGER tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Schema preset loading | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Onboarding flow (`get_initialization_status` → `save_initial_schema`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Timewarrior tools (if installed) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Rate limiting | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Audit log written | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Dry-run / confirmation flow | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Sensitive field redaction | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Per-target install guide | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Headless e2e automation | ✓ | ✓ | ✓ | ✓ | ~ | ✓ | ✓ |
-| Per-target deprecation warnings surfaced to user | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-
-> `~` for Claude Desktop e2e because it cannot be driven headlessly today. The v1.0 gate accepts a manual checklist plus a recorded transcript as evidence.
-
-### Per-target acceptance test (ADR 12, layer 3)
-
-Each target's `tests/targets/<target>/` runs the same script and reports per-feature pass/fail. The acceptance suite — identical across targets — is:
-
-1. Server starts, advertises the expected role's tool set
-2. `get_initialization_status` returns valid JSON
-3. `list_preset_schemas` returns at least the five bundled presets
-4. Onboarding round-trip: `analyze_existing_tasks_for_schema` → `generate_initial_schema_preview` → `save_initial_schema` (using a temp output path)
-5. `list_tasks` with empty and non-empty filters
-6. `get_task` for a known UUID
-7. `search_tasks` across `description`, `project`, `tags`, UDA
-8. `annotate_task` against a real task; verify via `get_task`
-9. `modify_task` of one built-in and one UDA field; verify
-10. `start_task` → `stop_task`; verify Timewarrior status if available
-11. `get_projects`, `get_tags`, `get_active_context`, `get_schema_info`
-12. GENERATOR-only: `create_task` minimal; `create_task` with full UDA payload
-13. MANAGER-only: `complete_task` with `dry_run=true` (expect `code: "dry_run"`)
-14. MANAGER-only: `delete_task` with `dry_run=true` (expect `code: "dry_run"`)
-15. MANAGER-only: `undo_last_action` after a real modification
-16. MANAGER-only: `sync_tasks` against a configured TaskChampion sync server (skipped if unconfigured)
-17. Rate limiter triggers at configured threshold; returns `code: "rate_limit"`
-18. Audit log entry written for every call above; entries parseable as JSON Lines with stable schema (ADR 13)
-19. Confirmation flow on a MANAGER lifecycle tool: first call → `code: "confirmation_required"`, second call → success
-20. Sensitive field in `config.redacted_fields` is absent from both tool return and audit log entry
-
-A target that fails any of items 1–20 blocks the v1.0 release for that target. Failure of items 1–18 across any target blocks the v1.0 release globally.
-
----
-
-## v1.1.0 and beyond
-
-### Workflow features (post-v1.0)
+### Workflow features (formerly v1.1+)
 
 - [ ] `get_phase_distribution` — aggregate phase counts for a project/scope
 - [ ] `get_decisions_in_flight` — list unique `decides:` values with current phases
