@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from taskchampion_mcp.cli import TaskwarriorCLI
-from taskchampion_mcp.config import load_config
+from taskchampion_mcp.config import Role, load_config
 from taskchampion_mcp.onboarding import (
     _default_schema_path,
     analyse_existing_tasks,
@@ -80,6 +80,52 @@ def _confirm(question: str, default_yes: bool = False) -> bool:
     return answer in ("y", "yes")
 
 
+def _resolve_role(
+    requested: str | None,
+    *,
+    non_interactive: bool,
+    already_configured: bool,
+) -> str | None:
+    """Resolve which role to persist via onboarding.
+
+    - ``requested`` (e.g. from ``--role``): validated and returned.
+    - non-interactive without a request: returns None so onboarding picks its
+      CONTRIBUTOR default.
+    - interactive without a request: prompt the user, defaulting to
+      CONTRIBUTOR (or the already-configured role, when one exists).
+    """
+    if requested:
+        try:
+            return Role.validate(requested)
+        except ValueError as exc:
+            _fail(str(exc))
+            raise SystemExit(2) from exc
+
+    if non_interactive:
+        return None
+
+    options = Role._HIERARCHY
+    default = Role.CONTRIBUTOR
+    if already_configured:
+        _info("Role is already set in config.toml; keep current unless you want to change it.")
+    _info("Select MCP permission level (role):")
+    for idx, name in enumerate(options, start=1):
+        marker = " (default)" if name == default else ""
+        print(f"    {idx}. {name}{marker}")
+    answer = _prompt("Enter role name or number", default=default)
+    if answer.isdigit():
+        idx = int(answer) - 1
+        if not 0 <= idx < len(options):
+            _fail(f"Invalid selection: {answer}")
+            raise SystemExit(2)
+        return options[idx]
+    try:
+        return Role.validate(answer)
+    except ValueError as exc:
+        _fail(str(exc))
+        raise SystemExit(2) from exc
+
+
 # ---------------------------------------------------------------------------
 # Generated-schema branch
 # ---------------------------------------------------------------------------
@@ -92,6 +138,7 @@ def _run_generate_branch(
     taxonomy_path: str | None,
     output_path: str | None,
     schema_name: str | None,
+    role: str | None,
     non_interactive: bool,
 ) -> bool:
     """Generate-and-save flow that delegates entirely to onboarding.*."""
@@ -183,6 +230,7 @@ def _run_generate_branch(
         schema_toml=preview["schema_toml"],
         taxonomy_path=str(resolved_taxonomy) if resolved_taxonomy else None,
         output_path=str(out_path),
+        role=role,
         overwrite=overwrite,
         update_config=True,
     )
@@ -198,6 +246,8 @@ def _run_generate_branch(
     if resolved_taxonomy:
         print(f"  Taxonomy: {resolved_taxonomy}")
     print(f"  Config:   {save_result['config_file']}")
+    if save_result.get("role"):
+        print(f"  Role:     {save_result['role']}")
     print()
     _info("Restart your MCP server to use the new schema.")
     return True
@@ -214,6 +264,7 @@ def _run_preset_branch(
     taxonomy_path: str | None,
     copy: bool,
     output_path: str | None,
+    role: str | None,
     non_interactive: bool,
 ) -> bool:
     """Preset-selection flow that delegates entirely to onboarding.*."""
@@ -260,6 +311,7 @@ def _run_preset_branch(
         preset_name=preset_name,
         taxonomy_path=taxonomy_path,
         output_path=output_path,
+        role=role,
         copy=copy,
         overwrite=overwrite,
         update_config=True,
@@ -272,6 +324,8 @@ def _run_preset_branch(
     if result.get("copied_to"):
         _ok(f"Copied preset to: {result['copied_to']}")
     _ok(f"Config updated: {result['config_file']}")
+    if result.get("role"):
+        _ok(f"Role persisted: {result['role']}")
     print()
     _info("Restart your MCP server to use the new schema.")
     return True
@@ -288,6 +342,7 @@ def run_init(
     output_path: str | None = None,
     schema_name: str | None = None,
     preset: str | None = None,
+    role: str | None = None,
     list_presets: bool = False,
     copy_preset: bool = False,
     non_interactive: bool = False,
@@ -330,6 +385,13 @@ def run_init(
             _info("Keeping existing configuration. Nothing to do.")
             return False
 
+    # Resolve role once, up front, so both branches persist it.
+    resolved_role = _resolve_role(
+        role,
+        non_interactive=non_interactive,
+        already_configured=bool(status.get("role_configured")),
+    )
+
     # Explicit preset selection wins.
     if preset is not None:
         return _run_preset_branch(
@@ -337,6 +399,7 @@ def run_init(
             taxonomy_path=taxonomy_path,
             copy=copy_preset,
             output_path=output_path,
+            role=resolved_role,
             non_interactive=non_interactive,
         )
 
@@ -347,6 +410,7 @@ def run_init(
         taxonomy_path=taxonomy_path,
         output_path=output_path,
         schema_name=schema_name,
+        role=resolved_role,
         non_interactive=non_interactive,
     )
 
@@ -401,6 +465,15 @@ def _build_parser() -> Any:
         help="Name of a bundled preset schema to install (e.g. minimal, gtd, kanban, scrum)",
     )
     parser.add_argument(
+        "--role",
+        default=None,
+        help=(
+            "MCP permission level to persist in config.toml "
+            "(CONTRIBUTOR / GENERATOR / MANAGER). "
+            "When omitted in non-interactive mode, defaults to CONTRIBUTOR."
+        ),
+    )
+    parser.add_argument(
         "--list-presets",
         action="store_true",
         help="List bundled preset schemas and exit",
@@ -430,6 +503,7 @@ def main() -> None:
         output_path=args.output,
         schema_name=args.name,
         preset=args.preset,
+        role=args.role,
         list_presets=args.list_presets,
         copy_preset=args.copy_preset,
         non_interactive=args.non_interactive,

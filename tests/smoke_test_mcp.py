@@ -117,10 +117,21 @@ def run_smoke_test(python_bin: str | None = None) -> int:
         taskdata_dir = tmp / "taskdata"
         taskdata_dir.mkdir()
 
+        # Isolate XDG_CONFIG_HOME so the smoke test does NOT inherit the local
+        # user's ~/.config/taskchampion-mcp/config.toml. Without this isolation
+        # the test result depends on whether the developer has completed
+        # onboarding on their machine — onboarding-complete configs cause the
+        # server to start in CONTRIBUTOR mode and the test's onboarding-mode
+        # expectation to fail spuriously. CI environments don't have a user
+        # config so they pass; local devs hit phantom failures.
+        xdg_isolated = tmp / "xdg"
+        xdg_isolated.mkdir()
+
         env = {
             **os.environ,
             "PATH": f"{stub_dir}:{os.environ.get('PATH', '/usr/bin')}",
             "TASKDATA": str(taskdata_dir),
+            "XDG_CONFIG_HOME": str(xdg_isolated),
         }
 
         print(f"[smoke] Starting server: {python} -m taskchampion_mcp.server")

@@ -202,8 +202,17 @@ _detect_platform() { echo "linux"; }
 _claude_desktop_config_path
 """
         path = _run_bash_helper(script)
-        assert "claude" in path.lower()
-        assert "claude_desktop_config.json" in path
+        # Claude Desktop on Linux uses the capitalised /Claude/ directory,
+        # matching macOS/WSL/Windows. A lowercase /claude/ creates a sibling
+        # directory that Claude Desktop never reads — silent install failure.
+        # Assert the *exact* casing so a lowercase regression fails CI.
+        assert "/Claude/claude_desktop_config.json" in path, (
+            f"Expected capitalised /Claude/ in path, got: {path!r}"
+        )
+        assert "/claude/claude_desktop_config.json" not in path, (
+            f"Lowercase /claude/ directory is wrong on Linux — Claude Desktop "
+            f"reads from ~/.config/Claude/ (capital C). Got: {path!r}"
+        )
 
     def test_macos_returns_library_path(self, tmp_path):
         script = """

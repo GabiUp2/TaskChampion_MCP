@@ -1006,3 +1006,69 @@ acceptable as a merge gate. The automated test strategy is:
   developers; slightly more friction for non-Python users)
 - WSL users need to know to use `bash -lc` variant — must be prominent in docs
 - Full publish path cannot be tested locally without a TestPyPI account
+
+---
+
+# ADR 17: Role-Elevation Asymmetry — LLM-Driven Reconfiguration Is One-Way Downward
+
+**Date:** 2026-05-27
+**Status:** Accepted
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+ADR 5 introduced three cumulative roles (CONTRIBUTOR < GENERATOR < MANAGER) and the v0.3.0 onboarding refactor moved role/schema persistence into `config.toml`. Once onboarding completes, the only way to change the persisted role or schema is to hand-edit `config.toml` and restart the IDE. This works but creates a real UX gap: switching schemas during a session — a routine workflow change, not a permission decision — requires the user to leave the LLM-driven flow.
+
+The natural fix is to expose configuration mutators (`set_active_schema`, `set_taxonomy_path`, `set_role`) as MCP tools. Doing so without care, however, would let the LLM grant itself privileges the user explicitly chose not to grant — a self-elevation path that defeats the entire role model.
+
+The threat model that motivates the role gate has three layers, all increasingly relevant:
+
+1. **Prompt injection via task content.** Task descriptions, annotations, project names, and the user's TAXONOMY.md are all model-readable text. A malicious or accidental instruction buried in any of those (a captured email turned into a task, a colleague's PR description, a shared taxonomy) becomes executable intent the moment the LLM has the matching capability. The role gate bounds the blast radius of such injections.
+2. **Misaligned tool selection.** Even without adversarial input, LLMs over-reach when "helpful" — "I'll clean up these duplicates for you" eagerly invokes `delete_task`. CONTRIBUTOR functioning as a ceiling, not just a default, is what makes "ask before destructive ops" enforceable.
+3. **Compromise upstream of the MCP.** If the IDE plugin, MCP server bundle, or model provider ever ships a bug or a tampered update, an unprivileged MCP role limits the damage that bug can do.
+
+If the LLM can self-elevate, all three protections collapse to "the LLM was honest about needing the privilege" — exactly what the gate was built to avoid relying on.
+
+## Decision
+
+Expose configuration mutators as CONTRIBUTOR-level MCP tools, but enforce a strict asymmetry between schema/taxonomy mutation, role downgrade, and role upgrade:
+
+| Operation | Exposed via MCP? | Rationale |
+|---|---|---|
+| `set_active_schema(schema_name OR schema_path)` | Yes, CONTRIBUTOR | Changes the validation lens, not capabilities. The LLM at CONTRIBUTOR can already modify tasks; picking the semantics under which it modifies them is a horizontal move, not an escalation. |
+| `set_taxonomy_path(path)` | Yes, CONTRIBUTOR | Same as above — informational input to the LLM, no capability change. |
+| `set_role(target)` where `level(target) ≤ level(current)` | Yes, CONTRIBUTOR | Voluntary de-privileging is always safe. Lets an LLM drop to CONTRIBUTOR for a risky sub-task or honour a user instruction to "be careful". |
+| `set_role(target)` where `level(target) > level(current)` | **No** | Self-elevation. Forbidden by design. The tool returns a structured error pointing the user at the CLI wizard or hand-edit + restart. |
+
+The asymmetry mirrors POSIX `setuid` semantics and the broader capability-systems convention: dropping privileges is unprivileged; raising them requires authorization that the current principal cannot grant itself.
+
+Privilege elevation paths that **remain** available, by design, all require out-of-band human action:
+
+- `./dev.sh init --role MANAGER` (CLI wizard) — explicitly invoked by the user from a shell, outside the LLM's tool surface.
+- Hand-edit `~/.config/taskchampion-mcp/config.toml` — the user owns the file.
+- Re-running `save_initial_schema` / `use_preset_schema` with an explicit `role=` argument, but only when the server is in onboarding mode (i.e., `requires_onboarding == True`). The onboarding tools are not registered post-completion, so an LLM cannot re-trigger them.
+
+Every successful configuration mutation MUST emit one audit log entry per ADR 13, capturing tool name, parameters, role before/after, and timestamp. Silent self-mutation is the failure mode this ADR exists to prevent; auditability is the second line of defence.
+
+## Alternatives Considered
+
+- **Expose symmetric `set_role` that allows upgrade.** Maximally convenient; defeats the entire purpose of having a role system. Rejected.
+- **Require user confirmation prompts in the LLM client for role upgrade.** Relies on the client honouring the prompt; many MCP clients today do not have a confirmation primitive, and prompt-injection-driven uplift can fabricate the "I confirm" follow-up. Insufficient.
+- **No reconfiguration tools at all; keep config edits hand-only.** Preserves the model rigidly but accepts the UX cost: every schema swap requires leaving the LLM flow. Rejected because schema switching is a frequent workflow change, not a privilege decision.
+- **Make role downgrade also out-of-band.** Symmetric but unnecessarily restrictive; voluntary de-privileging is harmless by construction.
+
+## Consequences
+
+### Pros
+- The role model retains its meaning: a CONTRIBUTOR can never become MANAGER without explicit, out-of-band human action.
+- Schema/taxonomy swap becomes a single LLM tool call — the workflow gap that motivated this ADR is closed.
+- Voluntary downgrade gives careful LLMs (or careful users) a way to ratchet down trust during risky sub-tasks.
+- Audit log makes every config mutation traceable; "what did the LLM change about my server" is queryable.
+- The forbidden-upgrade path is a structured error code (`role_elevation_forbidden`), discoverable in logs and dashboards.
+
+### Cons
+- Genuine "I want to give Claude MANAGER for this one task" workflows require leaving the chat for one CLI command. Acceptable friction — it's the feature.
+- Two ways now exist to change role (CLI wizard / hand-edit + restart, vs. downgrade-only MCP tool). Document both prominently in `docs/manuals/`.
+- Reconfiguration tools take effect on next IDE restart (runtime reload not yet implemented; see the runtime reload handoff doc on `dev`). Until that lands, the "restart required" hint is non-negotiable in every tool response.
+- The schema/taxonomy mutators technically affect what fields the LLM treats as valid for subsequent operations. A confused-deputy variant exists where a malicious task description tricks the LLM into pointing taxonomy at a forged file. Mitigation: validate the file exists before persisting, and audit-log the path change so a human review can catch it.
+

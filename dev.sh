@@ -139,7 +139,7 @@ _claude_desktop_config_path() {
     # macOS        : ~/Library/Application Support/Claude/claude_desktop_config.json
     # WSL          : /mnt/c/Users/<user>/AppData/Roaming/Claude/claude_desktop_config.json
     # Git Bash     : $APPDATA/Claude/claude_desktop_config.json  (Windows-style, resolved by bash)
-    # Linux        : ${XDG_CONFIG_HOME:-~/.config}/claude/claude_desktop_config.json
+    # Linux        : ${XDG_CONFIG_HOME:-~/.config}/Claude/claude_desktop_config.json
     local platform
     platform="$(_detect_platform)"
     case "$platform" in
@@ -162,7 +162,8 @@ _claude_desktop_config_path() {
                 echo "${win_appdata}/Claude/claude_desktop_config.json"
             else
                 warn "Cannot resolve Windows AppData in WSL; falling back to XDG path."
-                echo "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+                # Capital "Claude" — matches Linux/macOS/Windows casing.
+                echo "${XDG_CONFIG_HOME:-$HOME/.config}/Claude/claude_desktop_config.json"
             fi
             ;;
         windows_shell)
@@ -175,7 +176,12 @@ _claude_desktop_config_path() {
             fi
             ;;
         linux)
-            echo "${XDG_CONFIG_HOME:-$HOME/.config}/claude/claude_desktop_config.json"
+            # Capital "Claude" — Claude Desktop on Linux stores its config at
+            # ~/.config/Claude/, matching the macOS/WSL/Windows casing. Linux
+            # filesystems are case-sensitive, so a lowercase "claude" path
+            # silently breaks the install: the file is created but Claude
+            # Desktop never reads it.
+            echo "${XDG_CONFIG_HOME:-$HOME/.config}/Claude/claude_desktop_config.json"
             ;;
     esac
 }
@@ -498,6 +504,76 @@ action_inspect() {
     fi
 }
 
+_claude_code_available() {
+    # Returns 0 (true) if the 'claude' CLI is on PATH and supports `mcp` subcommand.
+    command -v claude &>/dev/null && claude mcp --help &>/dev/null
+}
+
+_claude_code_has_entry() {
+    # Returns 0 (true) if Claude Code has a 'taskchampion' MCP entry configured.
+    claude mcp list 2>/dev/null | grep -qE '^taskchampion[: ]'
+}
+
+_install_claude_code_target() {
+    # Wire taskchampion-MCP into Claude Code via `claude mcp add`.
+    # Uses the dev .venv Python so iteration against the local checkout works
+    # without re-publishing. For fresh remote boxes (e.g. Wintermute) prefer the
+    # `scripts/setup_remote.sh` bootstrap which uses a git-pinned `uv tool install`.
+    local scope="${1:-user}"
+
+    if ! _claude_code_available; then
+        fail "Claude Code CLI ('claude' with 'mcp' subcommand) not found on PATH."
+        echo "  Install: https://docs.anthropic.com/en/docs/claude-code"
+        exit 1
+    fi
+
+    _ensure_venv
+
+    local server_command="${VENV_DIR}/bin/python"
+
+    info "Wiring taskchampion MCP into Claude Code (scope=${scope})..."
+
+    # Remove any prior entry so add is idempotent (claude mcp add refuses on dup).
+    if _claude_code_has_entry; then
+        info "Removing existing 'taskchampion' entry first (idempotent install)..."
+        claude mcp remove taskchampion 2>/dev/null || true
+    fi
+
+    if claude mcp add taskchampion -s "${scope}" -- "${server_command}" -m taskchampion_mcp.server; then
+        ok "Claude Code: taskchampion entry written (scope=${scope})"
+        echo ""
+        info "Entry added via 'claude mcp add':"
+        echo "  scope:   ${scope}"
+        echo "  command: ${server_command}"
+        echo "  args:    -m taskchampion_mcp.server"
+        echo ""
+        info "Verify with: claude mcp list"
+        echo ""
+        info "Claude Code is a CLI — no IDE restart needed. Next 'claude' invocation"
+        info "will spawn the new MCP server and pick up the registered tool surface."
+    else
+        fail "Failed to add taskchampion to Claude Code MCP config."
+        exit 1
+    fi
+}
+
+_uninstall_claude_code_target() {
+    if ! _claude_code_available; then
+        warn "Claude Code CLI ('claude' with 'mcp' subcommand) not found on PATH; nothing to uninstall."
+        return
+    fi
+    if _claude_code_has_entry; then
+        info "Removing 'taskchampion' from Claude Code MCP config..."
+        if claude mcp remove taskchampion 2>/dev/null; then
+            ok "Removed."
+        else
+            warn "Removal command returned non-zero — entry may still exist."
+        fi
+    else
+        info "No 'taskchampion' entry found in Claude Code MCP config."
+    fi
+}
+
 _remove_mcp_entry() {
     # Remove the 'taskchampion' key from mcpServers in a JSON config file.
     # Uses Python for safe JSON manipulation.
@@ -573,6 +649,17 @@ action_install() {
     #                         wsl.exe bash -lc "uvx taskchampion-mcp"  (WSL)
     # See ADR 16 for the full rationale.
     # -------------------------------------------------------------------------
+
+    # Short-circuit: claude-code uses `claude mcp add` (CLI), not a JSON config
+    # file — different API surface, no IDE process to restart. Handle before the
+    # JSON-config machinery runs so we don't try to write a file Claude Code
+    # doesn't read.
+    if [ "${1:-}" = "claude-code" ]; then
+        shift
+        _install_claude_code_target "user"
+        return
+    fi
+
     _ensure_venv
 
     # Default server invocation (non-claude targets)
@@ -823,6 +910,12 @@ action_install() {
 }
 
 action_uninstall() {
+    # Short-circuit: claude-code uses `claude mcp remove`, not a JSON config edit.
+    if [ "${1:-}" = "claude-code" ]; then
+        _uninstall_claude_code_target
+        return
+    fi
+
     local _claude_cfg
     _claude_cfg="$(_claude_desktop_config_path)"
 
@@ -917,6 +1010,15 @@ action_uninstall() {
 }
 
 action_reinstall() {
+    # Short-circuit: claude-code is a CLI — no IDE process to terminate/restart.
+    # Reinstall is just uninstall + install (idempotent claude mcp add).
+    if [ "${1:-}" = "claude-code" ]; then
+        _uninstall_claude_code_target
+        echo ""
+        _install_claude_code_target "user"
+        return
+    fi
+
     local _claude_cfg
     _claude_cfg="$(_claude_desktop_config_path)"
 
@@ -1126,6 +1228,11 @@ action_clean() {
     _remove_mcp_entry "$HOME/.cursor/mcp.json" "Cursor"
     _remove_mcp_entry "$HOME/.vscode/mcp.json" "VS Code"
     _remove_mcp_entry "${_claude_cfg}" "Claude Desktop"
+    # Claude Code uses its own CLI surface; clean it too if the CLI is present.
+    if _claude_code_available && _claude_code_has_entry; then
+        info "Removing taskchampion from Claude Code MCP config..."
+        claude mcp remove taskchampion 2>/dev/null && ok "Claude Code: removed." || warn "Claude Code: remove returned non-zero."
+    fi
 
     ok "Clean complete."
 }
@@ -1187,11 +1294,12 @@ action_help() {
     echo "Actions:"
     echo "  setup     Install Python deps, create venv, install dev dependencies"
     echo "  check     Verify all required tools and report versions"
-    echo "  install   Add taskchampion MCP entry to IDE config [windsurf|cursor|vscode|claude]"
+    echo "  install   Add taskchampion MCP entry to IDE config [windsurf|cursor|vscode|claude|claude-code]"
     echo "            Use -r or --restart to gracefully restart the IDE after installation"
-    echo "  uninstall Remove taskchampion MCP entry from IDE config [windsurf|cursor|vscode|claude]"
+    echo "            (claude-code uses 'claude mcp add' CLI; no IDE restart needed)"
+    echo "  uninstall Remove taskchampion MCP entry from IDE config [windsurf|cursor|vscode|claude|claude-code]"
     echo "  reinstall Reinstall taskchampion MCP entry (gracefully terminates IDE, then uninstall + install)"
-    echo "            [windsurf|cursor|vscode|claude] Use -r or --restart to restart the IDE after reinstall"
+    echo "            [windsurf|cursor|vscode|claude|claude-code] Use -r or --restart to restart the IDE after reinstall"
     echo "  init      First-run schema wizard (analyse tasks + taxonomy, generate schema)"
     echo "  test      Run the test suite (pass extra pytest args after)"
     echo "  lint      Run ruff linter on src/ and tests/"

@@ -27,6 +27,9 @@ from taskchampion_mcp.onboarding import (
     get_initialisation_status as onboarding_get_initialisation_status,
     list_preset_schemas as onboarding_list_preset_schemas,
     propose_initialisation_options as onboarding_propose_initialisation_options,
+    reconfigure_active_schema as onboarding_reconfigure_active_schema,
+    reconfigure_role as onboarding_reconfigure_role,
+    reconfigure_taxonomy_path as onboarding_reconfigure_taxonomy_path,
     save_initial_schema as onboarding_save_initial_schema,
     use_preset_schema as onboarding_use_preset_schema,
 )
@@ -235,6 +238,7 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         schema_toml: str,
         taxonomy_path: str = "",
         output_path: str = "",
+        role: str = "",
         overwrite: bool = False,
         update_config: bool = True,
     ) -> str:
@@ -243,12 +247,19 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         This writes schema/config files but does not mutate Taskwarrior tasks.
         Call generate_initial_schema_preview first and show the user a summary
         before saving.
+
+        ``role`` is the MCP permission level to persist in config.toml. Pass
+        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialisation_options
+        for descriptions). When omitted, CONTRIBUTOR is persisted so the server
+        leaves onboarding mode on next restart. Without persisting a role the
+        server stays stuck on the onboarding tool surface.
         """
         return json.dumps(
             onboarding_save_initial_schema(
                 schema_toml=schema_toml,
                 taxonomy_path=taxonomy_path or None,
                 output_path=output_path or None,
+                role=role or None,
                 overwrite=overwrite,
                 update_config=update_config,
             )
@@ -270,6 +281,7 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         preset_name: str,
         taxonomy_path: str = "",
         output_path: str = "",
+        role: str = "",
         copy: bool = False,
         overwrite: bool = False,
         update_config: bool = True,
@@ -284,12 +296,19 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Refuses to overwrite an existing target file when copy=true unless
         overwrite=true.
+
+        ``role`` is the MCP permission level to persist in config.toml. Pass
+        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialisation_options
+        for descriptions). When omitted, CONTRIBUTOR is persisted so the server
+        leaves onboarding mode on next restart. Without persisting a role the
+        server stays stuck on the onboarding tool surface.
         """
         return json.dumps(
             onboarding_use_preset_schema(
                 preset_name=preset_name,
                 taxonomy_path=taxonomy_path or None,
                 output_path=output_path or None,
+                role=role or None,
                 copy=copy,
                 overwrite=overwrite,
                 update_config=update_config,
@@ -420,6 +439,107 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         def timew_status() -> str:
             """Check if Timewarrior is currently tracking time."""
             return json.dumps(reg.timew_status())
+
+    # -----------------------------------------------------------------------
+    # Post-onboarding reconfiguration (ADR 17)
+    #
+    # Schema / taxonomy mutation: allowed at any role (changes the lens,
+    # not the capabilities).  Role change: downgrade only — self-elevation
+    # is forbidden by design.  All three audit-log every successful and
+    # every failed call so the trail of LLM-driven config mutations is
+    # queryable.  See ADR 17 for the threat model.
+    # -----------------------------------------------------------------------
+
+    def _audit_reconfigure(tool_name: str, params: dict, result: dict) -> None:
+        """Emit one audit-log entry per reconfigure call (success or error)."""
+        ok = bool(result.get("success"))
+        summary_keys = (
+            "previous_role",
+            "new_role",
+            "schema_name",
+            "schema_path",
+            "taxonomy_path",
+            "error_code",
+        )
+        summary = {k: result.get(k) for k in summary_keys if k in result}
+        reg.audit.log(
+            tool_name=tool_name,
+            parameters=params,
+            result=json.dumps(summary, default=str),
+            success=ok,
+            error=None if ok else (result.get("message") or "unknown error"),
+        )
+
+    @mcp.tool()
+    def set_active_schema(
+        schema_name: str = "",
+        schema_path: str = "",
+    ) -> str:
+        """Switch the active task schema.
+
+        Exactly one of ``schema_name`` (a bundled preset such as
+        'minimal' / 'gtd' / 'kanban' / 'scrum') or ``schema_path``
+        (an absolute path to a custom TOML schema) must be provided.
+
+        Updates config.toml; takes effect on next MCP server restart
+        (runtime reload is not yet implemented). Does not mutate any
+        Taskwarrior tasks. Available at CONTRIBUTOR level and above —
+        switching the validation lens is a horizontal move, not a
+        privilege change (ADR 17).
+        """
+        params = {
+            "schema_name": schema_name or None,
+            "schema_path": schema_path or None,
+        }
+        result = onboarding_reconfigure_active_schema(
+            schema_name=schema_name or None,
+            schema_path=schema_path or None,
+        )
+        _audit_reconfigure("set_active_schema", params, result)
+        return json.dumps(result)
+
+    @mcp.tool()
+    def set_taxonomy_path(path: str) -> str:
+        """Update the taxonomy file path persisted in config.toml.
+
+        The taxonomy informs the model's interpretation of task
+        semantics. The target path must exist and be a regular file;
+        the tool refuses non-existent or directory targets to prevent
+        silently disabling taxonomy awareness.
+
+        Takes effect on next MCP server restart. Available at
+        CONTRIBUTOR level (informational input, not a capability).
+        """
+        params = {"path": path}
+        result = onboarding_reconfigure_taxonomy_path(path)
+        _audit_reconfigure("set_taxonomy_path", params, result)
+        return json.dumps(result)
+
+    @mcp.tool()
+    def set_role(target_role: str) -> str:
+        """Change the persisted MCP role — DOWNGRADE ONLY.
+
+        Valid roles: CONTRIBUTOR, GENERATOR, MANAGER (cumulative;
+        see ADR 5). This tool will set the persisted role to
+        ``target_role`` IF AND ONLY IF its level is less than or
+        equal to the currently-loaded role.
+
+        Self-elevation via MCP is forbidden by design (ADR 17).
+        Attempts to elevate return a structured error with
+        error_code='role_elevation_forbidden'. To elevate, run
+        './dev.sh init --role <ROLE>' from a shell or hand-edit
+        ~/.config/taskchampion-mcp/config.toml and restart the
+        MCP server.
+
+        Takes effect on next MCP server restart.
+        """
+        params = {"target_role": target_role, "current_role": reg.config.role}
+        result = onboarding_reconfigure_role(
+            current_role=reg.config.role,
+            target_role=target_role,
+        )
+        _audit_reconfigure("set_role", params, result)
+        return json.dumps(result)
 
 
 def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:

@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
-from taskchampion_mcp.config import ServerConfig, default_config_path, default_schema_dir
+from taskchampion_mcp.config import Role, ServerConfig, default_config_path, default_schema_dir
 from taskchampion_mcp.schema_gen import (
     TaxonomyInfo,
     analyze_tasks,
@@ -209,6 +209,9 @@ def get_initialisation_status(
         else:
             recommended_next_action = "ask_user_for_taxonomy_or_select_preset"
 
+    role_configured = bool(config.explicit_role_configured)
+    needs_role_selection = not role_configured
+
     return {
         "initialised": initialised,
         "needs_onboarding": needs_onboarding,
@@ -229,30 +232,105 @@ def get_initialisation_status(
         "timewarrior_available": bool(timew_cli and timew_cli.available()),
         "safe_to_mutate_tasks": False,
         "available_presets": [preset["name"] for preset in _list_presets_raw()],
-        "message_for_model": _status_message(needs_onboarding, task_count, taxonomy_available),
+        # Role configuration is a separate axis: the server stays in onboarding
+        # mode whenever either schema *or* role is missing from config.toml.
+        "active_role": config.role,
+        "role_configured": role_configured,
+        "needs_role_selection": needs_role_selection,
+        "available_roles": list(Role._HIERARCHY),
+        "message_for_model": _status_message(
+            needs_onboarding,
+            task_count,
+            taxonomy_available,
+            needs_role_selection=needs_role_selection,
+        ),
     }
 
 
-def _status_message(needs_onboarding: bool, task_count: int, taxonomy_available: bool) -> str:
+def _status_message(
+    needs_onboarding: bool,
+    task_count: int,
+    taxonomy_available: bool,
+    needs_role_selection: bool = False,
+) -> str:
+    role_suffix = (
+        "  No explicit role is set in config.toml; the server is using a "
+        "fallback CONTRIBUTOR role. Ask the user which role to persist "
+        "(CONTRIBUTOR / GENERATOR / MANAGER) and pass it to save_initial_schema "
+        "or use_preset_schema so the next restart exits onboarding mode."
+        if needs_role_selection
+        else ""
+    )
+
     if not needs_onboarding:
-        return (
+        base = (
             "User-specific task semantics are configured. "
             "Read schema/taxonomy before modifying tasks."
         )
+        return base + role_suffix
     if taxonomy_available:
-        return (
+        base = (
             "No active custom schema is configured, but a taxonomy file is available. "
             "Ask the user whether to use it to generate a reviewed schema."
         )
+        return base + role_suffix
     if task_count > 0:
-        return (
+        base = (
             "No taxonomy/schema is configured. Ask the user for a taxonomy file, "
             "offer to infer a draft schema from existing tasks, or select a bundled preset."
         )
-    return (
+        return base + role_suffix
+    base = (
         "No taxonomy/schema and no existing tasks are available. Ask the user to provide "
         "a taxonomy file or select a bundled preset via use_preset_schema."
     )
+    return base + role_suffix
+
+
+_ROLE_DESCRIPTIONS: dict[str, str] = {
+    Role.CONTRIBUTOR: (
+        "Read, annotate, and modify existing tasks. Cannot create or delete "
+        "tasks. Safe default for most users."
+    ),
+    Role.GENERATOR: (
+        "Everything CONTRIBUTOR can do, plus create new tasks and tags. "
+        "Pick this when the model should actively populate the backlog."
+    ),
+    Role.MANAGER: (
+        "Full lifecycle: everything GENERATOR can do, plus delete/undo and "
+        "destructive cleanup. Highest trust level — pick deliberately."
+    ),
+}
+
+
+def _role_choice_block(status: dict[str, Any]) -> dict[str, Any]:
+    """Self-describing role block for the calling model.
+
+    Surfaces whether a role is already persisted, the recommended default, and
+    the full list of valid roles with short descriptions, so the model can
+    present a role picker without further introspection.
+    """
+    role_configured = bool(status.get("role_configured"))
+    active_role = status.get("active_role") or Role.CONTRIBUTOR
+    return {
+        "id": "select_role",
+        "label": "Select MCP role (permission level)",
+        "required_for_completion": True,
+        "currently_configured": role_configured,
+        "active_role": active_role,
+        "recommended_role": Role.CONTRIBUTOR,
+        "next_tools": ["save_initial_schema", "use_preset_schema"],
+        "available_roles": [
+            {"name": name, "description": _ROLE_DESCRIPTIONS[name]}
+            for name in Role._HIERARCHY
+        ],
+        "description": (
+            "Role gates which tools the server registers after restart. "
+            "Pass the chosen role to save_initial_schema / use_preset_schema "
+            "so it is persisted in config.toml. Without an explicit role the "
+            "server stays in onboarding mode."
+        ),
+    }
 
 
 def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +338,10 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
 
     Each option is self-describing so the calling LLM can present a clean
     menu to the user without further introspection.
+
+    The returned payload includes a ``roles`` block alongside ``options``
+    because role selection is orthogonal to schema selection: both must be
+    persisted for the server to leave onboarding mode on next restart.
     """
     task_count = int(status.get("task_count") or 0)
     has_taxonomy = bool(status.get("taxonomy_exists") or status.get("detected_taxonomy_paths"))
@@ -267,7 +349,9 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "needs_onboarding": bool(status.get("needs_onboarding")),
+        "needs_role_selection": bool(status.get("needs_role_selection")),
         "recommended_next_action": status.get("recommended_next_action"),
+        "roles": _role_choice_block(status),
         "options": [
             {
                 "id": "use_taxonomy",
@@ -513,15 +597,32 @@ def save_initial_schema(
     schema_toml: str,
     taxonomy_path: str | None = None,
     output_path: str | None = None,
+    role: str | None = None,
     overwrite: bool = False,
     update_config: bool = True,
 ) -> dict[str, Any]:
-    """Persist an approved generated schema and optionally update ``config.toml``."""
+    """Persist an approved generated schema and optionally update ``config.toml``.
+
+    ``role`` is validated against :class:`Role`.  When ``update_config`` is
+    True and no ``role`` is provided, the persisted config defaults to
+    ``CONTRIBUTOR`` so that ``ServerConfig.explicit_role_configured`` becomes
+    True on the next load and the server leaves onboarding mode.  Pass an
+    explicit role (e.g. ``"GENERATOR"`` or ``"MANAGER"``) to grant a higher
+    permission level.
+    """
     if not schema_toml.strip():
         return {
             "error": True,
             "message": "schema_toml is empty; generate and review a preview first.",
         }
+
+    effective_role: str | None = None
+    if update_config:
+        candidate = role if role else Role.CONTRIBUTOR
+        try:
+            effective_role = Role.validate(candidate)
+        except ValueError as exc:
+            return {"error": True, "message": str(exc)}
 
     out = Path(output_path).expanduser() if output_path else _default_schema_path()
     if out.exists():
@@ -546,6 +647,7 @@ def save_initial_schema(
             taxonomy_path=str(Path(taxonomy_path).expanduser().resolve())
             if taxonomy_path
             else None,
+            role=effective_role,
         )
 
     return {
@@ -553,6 +655,7 @@ def save_initial_schema(
         "schema_path": str(saved_path),
         "config_updated": update_config,
         "config_file": str(cfg_path) if cfg_path else None,
+        "role": effective_role,
         "message": "Initial schema saved. Restart the MCP server to load it.",
     }
 
@@ -633,6 +736,7 @@ def use_preset_schema(
     preset_name: str,
     taxonomy_path: str | None = None,
     output_path: str | None = None,
+    role: str | None = None,
     copy: bool = False,
     overwrite: bool = False,
     update_config: bool = True,
@@ -651,6 +755,11 @@ def use_preset_schema(
 
     Refuses to overwrite an existing target file when ``copy=True`` unless
     ``overwrite=True``.
+
+    ``role`` is validated against :class:`Role`.  When ``update_config`` is
+    True and no ``role`` is provided, the persisted config defaults to
+    ``CONTRIBUTOR`` so that ``ServerConfig.explicit_role_configured`` becomes
+    True on the next load and the server leaves onboarding mode.
     """
     raw_presets = _list_presets_raw()
     by_name = {p["name"]: p for p in raw_presets}
@@ -662,6 +771,14 @@ def use_preset_schema(
             ),
             "available_presets": sorted(by_name.keys()),
         }
+
+    effective_role: str | None = None
+    if update_config:
+        candidate = role if role else Role.CONTRIBUTOR
+        try:
+            effective_role = Role.validate(candidate)
+        except ValueError as exc:
+            return {"error": True, "message": str(exc)}
 
     preset_path = Path(by_name[preset_name]["path"])
 
@@ -687,6 +804,7 @@ def use_preset_schema(
             taxonomy_path=str(Path(taxonomy_path).expanduser().resolve())
             if taxonomy_path
             else None,
+            role=effective_role,
             clear_schema_path=not saved_path,
         )
 
@@ -697,6 +815,7 @@ def use_preset_schema(
         "copied_to": str(saved_path) if saved_path else None,
         "config_updated": update_config,
         "config_file": str(cfg_path) if cfg_path else None,
+        "role": effective_role,
         "message": (f"Preset '{preset_name}' selected. Restart the MCP server to load it."),
     }
 
@@ -710,6 +829,7 @@ def upsert_server_config(
     schema_path: str | None = None,
     schema_name: str | None = None,
     taxonomy_path: str | None = None,
+    role: str | None = None,
     clear_schema_path: bool = False,
 ) -> Path:
     """Insert/update ``[server]`` keys in the user config file.
@@ -719,6 +839,10 @@ def upsert_server_config(
     - ``schema_path``:  if provided, set ``schema_path = "<value>"``.
     - ``schema_name``:  if provided, set ``schema = "<value>"`` (preset selection).
     - ``taxonomy_path``: if provided, set ``taxonomy_path = "<value>"``.
+    - ``role``:         if provided, set ``role = "<value>"``. Validated against
+      :class:`Role`. Persisting an explicit role is what flips
+      ``ServerConfig.explicit_role_configured`` to ``True`` on next load, which
+      is required for the server to leave onboarding mode.
     - ``clear_schema_path``: if True, comment out an existing ``schema_path``
       line.  Useful when switching from a generated schema back to a named
       preset.
@@ -727,6 +851,8 @@ def upsert_server_config(
     operating on raw lines rather than re-emitting parsed TOML.  This is the
     single implementation; the CLI wizard calls into it.
     """
+    validated_role: str | None = Role.validate(role) if role else None
+
     cfg_path = default_config_path()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -737,9 +863,14 @@ def upsert_server_config(
     wrote_schema_path = False
     wrote_schema_name = False
     wrote_taxonomy = False
+    wrote_role = False
 
     def append_missing_server_keys() -> None:
-        nonlocal wrote_schema_path, wrote_schema_name, wrote_taxonomy
+        nonlocal wrote_schema_path, wrote_schema_name, wrote_taxonomy, wrote_role
+        # Role first so the file reads "role = ... ; schema = ..." top-down.
+        if validated_role and not wrote_role:
+            new_lines.append(f'role = "{validated_role}"')
+            wrote_role = True
         if schema_path and not wrote_schema_path:
             new_lines.append(f'schema_path = "{schema_path}"')
             wrote_schema_path = True
@@ -762,6 +893,14 @@ def upsert_server_config(
             if in_server:
                 append_missing_server_keys()
             in_server = False
+            new_lines.append(line)
+            continue
+
+        if in_server and (stripped.startswith("role ") or stripped.startswith("role=")):
+            if validated_role:
+                new_lines.append(f'role = "{validated_role}"')
+                wrote_role = True
+                continue
             new_lines.append(line)
             continue
 
@@ -812,6 +951,184 @@ def upsert_server_config(
     return cfg_path
 
 
+# ---------------------------------------------------------------------------
+# Post-onboarding reconfiguration (ADR 17)
+#
+# These functions back the runtime reconfigure_* MCP tools registered at
+# CONTRIBUTOR level in server.py.  They are intentionally one-way: schema /
+# taxonomy mutation is allowed at any role, role downgrade is allowed, role
+# upgrade via MCP is forbidden by design.  See ADR 17 for the threat model.
+# ---------------------------------------------------------------------------
+
+
+_ROLE_ELEVATION_FORBIDDEN_CODE = "role_elevation_forbidden"
+
+
+def reconfigure_active_schema(
+    schema_name: str | None = None,
+    schema_path: str | None = None,
+) -> dict[str, Any]:
+    """Switch the active schema by updating ``config.toml``.
+
+    Exactly one of ``schema_name`` (a bundled preset) or ``schema_path``
+    (a file path to a custom schema TOML) must be provided.
+
+    Does not mutate Taskwarrior tasks.  Server restart required to apply
+    (runtime reload is not yet implemented).
+    """
+    if not schema_name and not schema_path:
+        return {
+            "error": True,
+            "message": "Provide exactly one of schema_name or schema_path.",
+        }
+    if schema_name and schema_path:
+        return {
+            "error": True,
+            "message": (
+                "Provide exactly one of schema_name or schema_path, not both. "
+                "schema_path overrides schema_name when both are set in "
+                "config.toml; pass only the one you intend to activate."
+            ),
+        }
+
+    if schema_name:
+        known = {p["name"] for p in _list_presets_raw()}
+        if schema_name not in known:
+            return {
+                "error": True,
+                "message": (
+                    f"Unknown preset '{schema_name}'. "
+                    f"Available: {sorted(known)}"
+                ),
+                "available_presets": sorted(known),
+            }
+        cfg_path = upsert_server_config(
+            schema_name=schema_name,
+            clear_schema_path=True,
+        )
+        return {
+            "success": True,
+            "schema_name": schema_name,
+            "schema_path": None,
+            "config_file": str(cfg_path),
+            "restart_required": True,
+            "message": (
+                f"Schema set to preset '{schema_name}'. "
+                "Restart the MCP server to load it."
+            ),
+        }
+
+    # schema_path branch
+    resolved = Path(schema_path).expanduser().resolve()
+    if not resolved.exists():
+        return {
+            "error": True,
+            "message": f"Schema file not found: {resolved}",
+        }
+    cfg_path = upsert_server_config(schema_path=str(resolved))
+    return {
+        "success": True,
+        "schema_name": None,
+        "schema_path": str(resolved),
+        "config_file": str(cfg_path),
+        "restart_required": True,
+        "message": (
+            f"Schema path set to {resolved}. Restart the MCP server to load it."
+        ),
+    }
+
+
+def reconfigure_taxonomy_path(path: str) -> dict[str, Any]:
+    """Update the ``taxonomy_path`` entry in ``config.toml``.
+
+    Validates that the target file exists before persisting.  The taxonomy
+    file influences how the model interprets task semantics; pointing it at
+    a non-existent path would silently disable taxonomy awareness.
+    """
+    if not path or not path.strip():
+        return {"error": True, "message": "path must be a non-empty string."}
+
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        return {
+            "error": True,
+            "message": f"Taxonomy file not found: {resolved}",
+        }
+    if not resolved.is_file():
+        return {
+            "error": True,
+            "message": f"Taxonomy path is not a regular file: {resolved}",
+        }
+
+    cfg_path = upsert_server_config(taxonomy_path=str(resolved))
+    return {
+        "success": True,
+        "taxonomy_path": str(resolved),
+        "config_file": str(cfg_path),
+        "restart_required": True,
+        "message": (
+            f"Taxonomy path set to {resolved}. Restart the MCP server to "
+            "load it."
+        ),
+    }
+
+
+def reconfigure_role(
+    current_role: str,
+    target_role: str,
+) -> dict[str, Any]:
+    """Change the persisted role — downgrade only.
+
+    Refuses if ``level(target) > level(current)``.  Self-elevation via MCP
+    is forbidden by design (ADR 17); the structured error includes the
+    ``role_elevation_forbidden`` code so dashboards / SIEM queries can
+    surface attempts.
+
+    A no-op (target == current) succeeds and returns ``success=True`` so
+    the tool is idempotent for clients that re-issue on transient failures.
+    """
+    try:
+        target = Role.validate(target_role)
+    except ValueError as exc:
+        return {"error": True, "message": str(exc)}
+
+    try:
+        current_validated = Role.validate(current_role)
+    except ValueError as exc:
+        return {
+            "error": True,
+            "message": f"Current role is invalid: {exc}",
+        }
+
+    if Role.level(target) > Role.level(current_validated):
+        return {
+            "error": True,
+            "error_code": _ROLE_ELEVATION_FORBIDDEN_CODE,
+            "current_role": current_validated,
+            "requested_role": target,
+            "message": (
+                f"Self-elevation forbidden: cannot raise role from "
+                f"{current_validated} to {target} via MCP (ADR 17). "
+                "To elevate, run './dev.sh init --role <ROLE>' from a "
+                "shell, or hand-edit ~/.config/taskchampion-mcp/config.toml "
+                "and restart the MCP server."
+            ),
+        }
+
+    cfg_path = upsert_server_config(role=target)
+    return {
+        "success": True,
+        "previous_role": current_validated,
+        "new_role": target,
+        "config_file": str(cfg_path),
+        "restart_required": True,
+        "message": (
+            f"Role set to {target} (from {current_validated}). "
+            "Restart the MCP server to apply."
+        ),
+    }
+
+
 __all__ = [
     "analyse_existing_tasks",
     "analyse_taxonomy_file",
@@ -821,9 +1138,13 @@ __all__ = [
     "get_initialisation_status",
     "list_preset_schemas",
     "propose_initialisation_options",
+    "reconfigure_active_schema",
+    "reconfigure_role",
+    "reconfigure_taxonomy_path",
     "resolve_taxonomy_path",
     "save_initial_schema",
     "upsert_server_config",
     "use_preset_schema",
     "_default_schema_path",
+    "_ROLE_ELEVATION_FORBIDDEN_CODE",
 ]
