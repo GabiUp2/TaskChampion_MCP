@@ -263,9 +263,7 @@ class TestToolingExtensions:
 
     def test_bulk_modify_requires_confirmation(self, tool_registry, mock_task_cli, mock_config):
         mock_config.require_confirmation = True
-        mock_task_cli.export_tasks.return_value = [
-            {"uuid": "11111111-1111-1111-1111-111111111111"}
-        ]
+        mock_task_cli.export_tasks.return_value = [{"uuid": "11111111-1111-1111-1111-111111111111"}]
 
         result = tool_registry.bulk_modify(
             filters="project:work",
@@ -377,7 +375,9 @@ class TestToolsCoverageSprint:
         assert ctx["error"] is True
 
     def test_get_task_report_cli_error(self, tool_registry, mock_task_cli):
-        mock_task_cli.run_report.return_value = CLIResult(returncode=1, stdout="", stderr="bad report")
+        mock_task_cli.run_report.return_value = CLIResult(
+            returncode=1, stdout="", stderr="bad report"
+        )
         result = tool_registry.get_task_report("next")
         assert result["error"] is True
         assert result["code"] == "cli_error"
@@ -462,7 +462,9 @@ class TestToolsCoverageSprint:
         assert complete["code"] == "not_found"
         assert delete["code"] == "not_found"
 
-    def test_complete_delete_undo_sync_cli_error_paths(self, tool_registry, mock_task_cli, mock_config):
+    def test_complete_delete_undo_sync_cli_error_paths(
+        self, tool_registry, mock_task_cli, mock_config
+    ):
         mock_config.require_confirmation = False
         mock_task_cli.done_task.return_value = CLIResult(returncode=1, stdout="", stderr="x")
         mock_task_cli.delete_task.return_value = CLIResult(returncode=1, stdout="", stderr="x")

@@ -23,6 +23,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Tool-surface expectations per scenario
 # ---------------------------------------------------------------------------
@@ -110,12 +112,12 @@ def _make_task_stub(tmp_dir: Path) -> Path:
     tmp_dir.mkdir(parents=True, exist_ok=True)
     stub = tmp_dir / "task"
     stub.write_text(
-        '#!/bin/sh\n'
+        "#!/bin/sh\n"
         'case "$1" in\n'
         '  _version) echo "3.99.0" ;;\n'
         '  export)   echo "[]" ;;\n'
         '  *) echo "[]" ;;\n'
-        'esac\n'
+        "esac\n"
     )
     stub.chmod(0o755)
     return tmp_dir
@@ -200,23 +202,28 @@ def run_smoke_test(
             # --------------------------------------------------------------
             # Step 1: initialize handshake
             # --------------------------------------------------------------
-            _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "smoke-test", "version": "0.0.1"},
+            _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "smoke-test", "version": "0.0.1"},
+                    },
                 },
-            })
+            )
 
             resp = _recv(proc)
             assert resp.get("id") == 1, f"Unexpected id in initialize response: {resp}"
             result = resp.get("result", {})
             server_info = result.get("serverInfo", {})
-            print(f"[smoke] Server identified as: {server_info.get('name', '?')} "
-                  f"v{server_info.get('version', '?')}")
+            print(
+                f"[smoke] Server identified as: {server_info.get('name', '?')} "
+                f"v{server_info.get('version', '?')}"
+            )
 
             # Send initialized notification
             _send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
@@ -224,12 +231,15 @@ def run_smoke_test(
             # --------------------------------------------------------------
             # Step 2: list tools
             # --------------------------------------------------------------
-            _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/list",
-                "params": {},
-            })
+            _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
 
             resp = _recv(proc)
             assert resp.get("id") == 2, f"Unexpected id in tools/list response: {resp}"
@@ -293,8 +303,6 @@ def run_smoke_test(
 # pytest entry points — one parametrised test per scenario so failures
 # point at the specific tool surface that broke.
 # ---------------------------------------------------------------------------
-
-import pytest
 
 
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS.keys()))

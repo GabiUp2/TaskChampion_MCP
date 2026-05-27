@@ -11,8 +11,8 @@ from taskchampion_mcp.config import Role, ServerConfig
 from taskchampion_mcp.rate_limiter import RateLimiter
 from taskchampion_mcp.schema import TaskSchema
 from taskchampion_mcp.server import (
-    _JsonLineFormatter,
     _configure_logging,
+    _JsonLineFormatter,
     _register_contributor_tools,
     _register_generator_tools,
     _register_manager_tools,

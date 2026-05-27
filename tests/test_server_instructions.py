@@ -19,4 +19,3 @@ def test_generator_instructions_include_start_stop_plus_create() -> None:
     instructions = _render(Role.GENERATOR)
     assert "READ, ANNOTATE, MODIFY, START, STOP, and CREATE" in instructions
     assert "CANNOT complete or delete tasks" in instructions
-

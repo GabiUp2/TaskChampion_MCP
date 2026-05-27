@@ -205,11 +205,11 @@ def create_server(
     mcp = FastMCP(
         "TaskChampion MCP",
         instructions=_build_instructions(
-    config,
-    schema,
-    tw_version,
-    onboarding_required=onboarding_required,
-),
+            config,
+            schema,
+            tw_version,
+            onboarding_required=onboarding_required,
+        ),
     )
 
     # --- Register tools by role level ---------------------------------------
@@ -289,7 +289,7 @@ def _audit_call(
     reg: ToolRegistry,
     tool_name: str,
     params: dict[str, Any],
-    fn: "Callable[[], dict[str, Any]]",
+    fn: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
     """Rate-limit + run ``fn`` + audit-log the call.
 
@@ -398,15 +398,19 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         the bundled minimal default rather than a user-specific taxonomy.
         """
         params = {"project_dir": project_dir or None}
-        return json.dumps(_audit_call(
-            reg, "get_initialization_status", params,
-            lambda: onboarding_get_initialization_status(
-                config=reg.config,
-                task_cli=reg.task,
-                timew_cli=reg.timew,
-                project_dir=project_dir or None,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "get_initialization_status",
+                params,
+                lambda: onboarding_get_initialization_status(
+                    config=reg.config,
+                    task_cli=reg.task,
+                    timew_cli=reg.timew,
+                    project_dir=project_dir or None,
+                ),
+            )
+        )
 
     @mcp.tool()
     def propose_initialization_options(project_dir: str = "") -> str:
@@ -435,10 +439,14 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         This is read-only. It returns field occurrence ratios, likely enum
         values, likely required fields, projects, tags, and detected UDAs.
         """
-        return json.dumps(_audit_call(
-            reg, "analyze_existing_tasks_for_schema", {},
-            lambda: onboarding_analyze_existing_tasks(reg.task),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "analyze_existing_tasks_for_schema",
+                {},
+                lambda: onboarding_analyze_existing_tasks(reg.task),
+            )
+        )
 
     @mcp.tool()
     def analyze_taxonomy_file(path: str) -> str:
@@ -447,10 +455,14 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         This is read-only. It extracts fields, descriptions, allowed values,
         conditional requirements, and phase transitions when possible.
         """
-        return json.dumps(_audit_call(
-            reg, "analyze_taxonomy_file", {"path": path},
-            lambda: onboarding_analyze_taxonomy_file(path),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "analyze_taxonomy_file",
+                {"path": path},
+                lambda: onboarding_analyze_taxonomy_file(path),
+            )
+        )
 
     @mcp.tool()
     def generate_initial_schema_preview(
@@ -469,16 +481,20 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "project_dir": project_dir or None,
             "schema_name": schema_name or None,
         }
-        return json.dumps(_audit_call(
-            reg, "generate_initial_schema_preview", params,
-            lambda: onboarding_generate_schema_preview(
-                config=reg.config,
-                task_cli=reg.task,
-                taxonomy_path=taxonomy_path or None,
-                project_dir=project_dir or None,
-                schema_name=schema_name or None,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "generate_initial_schema_preview",
+                params,
+                lambda: onboarding_generate_schema_preview(
+                    config=reg.config,
+                    task_cli=reg.task,
+                    taxonomy_path=taxonomy_path or None,
+                    project_dir=project_dir or None,
+                    schema_name=schema_name or None,
+                ),
+            )
+        )
 
     @mcp.tool()
     def save_initial_schema(
@@ -510,17 +526,21 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "overwrite": overwrite,
             "update_config": update_config,
         }
-        return json.dumps(_audit_call(
-            reg, "save_initial_schema", params,
-            lambda: onboarding_save_initial_schema(
-                schema_toml=schema_toml,
-                taxonomy_path=taxonomy_path or None,
-                output_path=output_path or None,
-                role=role or None,
-                overwrite=overwrite,
-                update_config=update_config,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "save_initial_schema",
+                params,
+                lambda: onboarding_save_initial_schema(
+                    schema_toml=schema_toml,
+                    taxonomy_path=taxonomy_path or None,
+                    output_path=output_path or None,
+                    role=role or None,
+                    overwrite=overwrite,
+                    update_config=update_config,
+                ),
+            )
+        )
 
     @mcp.tool()
     def list_preset_schemas() -> str:
@@ -531,10 +551,14 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         before calling use_preset_schema so the user can see what is
         available without you guessing the preset names.
         """
-        return json.dumps(_audit_call(
-            reg, "list_preset_schemas", {},
-            lambda: onboarding_list_preset_schemas(),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "list_preset_schemas",
+                {},
+                lambda: onboarding_list_preset_schemas(),
+            )
+        )
 
     @mcp.tool()
     def use_preset_schema(
@@ -572,18 +596,22 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "overwrite": overwrite,
             "update_config": update_config,
         }
-        return json.dumps(_audit_call(
-            reg, "use_preset_schema", params,
-            lambda: onboarding_use_preset_schema(
-                preset_name=preset_name,
-                taxonomy_path=taxonomy_path or None,
-                output_path=output_path or None,
-                role=role or None,
-                copy=copy,
-                overwrite=overwrite,
-                update_config=update_config,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "use_preset_schema",
+                params,
+                lambda: onboarding_use_preset_schema(
+                    preset_name=preset_name,
+                    taxonomy_path=taxonomy_path or None,
+                    output_path=output_path or None,
+                    role=role or None,
+                    copy=copy,
+                    overwrite=overwrite,
+                    update_config=update_config,
+                ),
+            )
+        )
 
 
 def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
@@ -765,14 +793,18 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "schema_path": schema_path or None,
             "dry_run": dry_run,
         }
-        return json.dumps(_audit_call(
-            reg, "set_active_schema", params,
-            lambda: onboarding_reconfigure_active_schema(
-                schema_name=schema_name or None,
-                schema_path=schema_path or None,
-                dry_run=dry_run,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "set_active_schema",
+                params,
+                lambda: onboarding_reconfigure_active_schema(
+                    schema_name=schema_name or None,
+                    schema_path=schema_path or None,
+                    dry_run=dry_run,
+                ),
+            )
+        )
 
     @mcp.tool()
     def set_taxonomy_path(path: str, dry_run: bool = False) -> str:
@@ -790,10 +822,14 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Takes effect on next MCP server restart. Available at
         CONTRIBUTOR level (informational input, not a capability).
         """
-        return json.dumps(_audit_call(
-            reg, "set_taxonomy_path", {"path": path, "dry_run": dry_run},
-            lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "set_taxonomy_path",
+                {"path": path, "dry_run": dry_run},
+                lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
+            )
+        )
 
     @mcp.tool()
     def set_role(target_role: str, dry_run: bool = False) -> str:
@@ -825,14 +861,18 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "current_role": reg.config.role,
             "dry_run": dry_run,
         }
-        return json.dumps(_audit_call(
-            reg, "set_role", params,
-            lambda: onboarding_reconfigure_role(
-                current_role=reg.config.role,
-                target_role=target_role,
-                dry_run=dry_run,
-            ),
-        ))
+        return json.dumps(
+            _audit_call(
+                reg,
+                "set_role",
+                params,
+                lambda: onboarding_reconfigure_role(
+                    current_role=reg.config.role,
+                    target_role=target_role,
+                    dry_run=dry_run,
+                ),
+            )
+        )
 
 
 def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
