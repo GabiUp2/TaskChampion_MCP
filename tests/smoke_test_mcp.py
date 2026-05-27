@@ -24,10 +24,10 @@ import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Minimal tool surface expected regardless of role / schema / onboarding state
+# Tool-surface expectations per scenario
 # ---------------------------------------------------------------------------
 
-# Onboarding tools — always registered on a fresh / uninitialised install
+# Onboarding tools — registered when config.toml is empty / missing
 EXPECTED_ONBOARDING_TOOLS = {
     "get_initialization_status",
     "propose_initialization_options",
@@ -39,7 +39,7 @@ EXPECTED_ONBOARDING_TOOLS = {
     "analyze_taxonomy_file",
 }
 
-# Contributor tools — registered after onboarding (or always, per stable-surface ADR)
+# Contributor tools — registered after onboarding completes
 EXPECTED_CONTRIBUTOR_TOOLS = {
     "list_tasks",
     "get_task",
@@ -50,9 +50,31 @@ EXPECTED_CONTRIBUTOR_TOOLS = {
     "modify_task",
     "start_task",
     "stop_task",
+    "get_active_context",
+    "get_schema_info",
+    "get_task_report",
 }
 
-# Minimum set that must be present in every smoke-test run
+# Reconfigure tools — registered alongside CONTRIBUTOR tools (ADR 17 surface)
+EXPECTED_RECONFIGURE_TOOLS = {
+    "set_active_schema",
+    "set_taxonomy_path",
+    "set_role",
+}
+
+# Per-scenario required-tool sets and exclusions
+SCENARIOS = {
+    "onboarding": {
+        "must_have": EXPECTED_ONBOARDING_TOOLS,
+        "must_not_have": EXPECTED_CONTRIBUTOR_TOOLS | EXPECTED_RECONFIGURE_TOOLS,
+    },
+    "post_onboarding": {
+        "must_have": EXPECTED_CONTRIBUTOR_TOOLS | EXPECTED_RECONFIGURE_TOOLS,
+        "must_not_have": EXPECTED_ONBOARDING_TOOLS,
+    },
+}
+
+# Back-compat alias kept while the test harness migrates to scenario names.
 MINIMUM_REQUIRED_TOOLS = EXPECTED_ONBOARDING_TOOLS
 
 
@@ -99,14 +121,42 @@ def _make_task_stub(tmp_dir: Path) -> Path:
     return tmp_dir
 
 
-def run_smoke_test(python_bin: str | None = None) -> int:
+def _seed_post_onboarding_config(xdg_dir: Path) -> None:
+    """Seed an XDG_CONFIG_HOME with a minimal post-onboarding config.toml so
+    the server starts in CONTRIBUTOR mode (not onboarding mode).
+
+    The two keys (``role`` + ``schema``) are both required for
+    ``requires_onboarding`` to return False per the server-factory logic.
     """
-    Run the MCP smoke test.  Returns 0 on success, 1 on failure.
+    cfg_dir = xdg_dir / "taskchampion-mcp"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.toml").write_text(
+        '[server]\nrole = "CONTRIBUTOR"\nschema = "minimal"\n',
+        encoding="utf-8",
+    )
+
+
+def run_smoke_test(
+    python_bin: str | None = None,
+    scenario: str = "onboarding",
+) -> int:
+    """
+    Run the MCP smoke test for one scenario.  Returns 0 on success, 1 on failure.
+
+    Scenarios:
+        - ``onboarding`` (default): empty XDG, expects the 8 onboarding tools.
+        - ``post_onboarding``: XDG seeded with role + schema, expects the
+          CONTRIBUTOR + reconfigure surface and the absence of onboarding tools.
 
     Args:
         python_bin: path to the Python interpreter to use.  Defaults to the
                     same interpreter running this script.
+        scenario:   which configuration to set up.  Must be a key in SCENARIOS.
     """
+    if scenario not in SCENARIOS:
+        print(f"[smoke] FAIL — unknown scenario {scenario!r}", file=sys.stderr)
+        return 1
+
     python = python_bin or sys.executable
     project_root = Path(__file__).parent.parent
 
@@ -126,6 +176,8 @@ def run_smoke_test(python_bin: str | None = None) -> int:
         # config so they pass; local devs hit phantom failures.
         xdg_isolated = tmp / "xdg"
         xdg_isolated.mkdir()
+        if scenario == "post_onboarding":
+            _seed_post_onboarding_config(xdg_isolated)
 
         env = {
             **os.environ,
@@ -134,7 +186,7 @@ def run_smoke_test(python_bin: str | None = None) -> int:
             "XDG_CONFIG_HOME": str(xdg_isolated),
         }
 
-        print(f"[smoke] Starting server: {python} -m taskchampion_mcp.server")
+        print(f"[smoke] Starting server [scenario={scenario}]: {python} -m taskchampion_mcp.server")
         proc = subprocess.Popen(
             [python, "-m", "taskchampion_mcp.server"],
             stdin=subprocess.PIPE,
@@ -185,15 +237,33 @@ def run_smoke_test(python_bin: str | None = None) -> int:
             print(f"[smoke] Tools registered: {sorted(tools)}")
 
             # --------------------------------------------------------------
-            # Step 3: assert minimum tool surface
+            # Step 3: assert per-scenario tool surface
             # --------------------------------------------------------------
-            missing = MINIMUM_REQUIRED_TOOLS - tools
+            expectations = SCENARIOS[scenario]
+            must_have = expectations["must_have"]
+            must_not_have = expectations["must_not_have"]
+
+            missing = must_have - tools
+            unexpected = must_not_have & tools
+
             if missing:
-                print(f"[smoke] FAIL — missing expected tools: {sorted(missing)}", file=sys.stderr)
+                print(
+                    f"[smoke] FAIL [{scenario}] — missing expected tools: {sorted(missing)}",
+                    file=sys.stderr,
+                )
+                return 1
+            if unexpected:
+                print(
+                    f"[smoke] FAIL [{scenario}] — tools registered that should NOT be: "
+                    f"{sorted(unexpected)}",
+                    file=sys.stderr,
+                )
                 return 1
 
-            print(f"[smoke] OK — all {len(MINIMUM_REQUIRED_TOOLS)} required tools present "
-                  f"({len(tools)} total)")
+            print(
+                f"[smoke] OK [{scenario}] — all {len(must_have)} expected tools present, "
+                f"{len(must_not_have)} forbidden tools absent ({len(tools)} total registered)"
+            )
             return 0
 
         except TimeoutError as exc:
@@ -220,18 +290,28 @@ def run_smoke_test(python_bin: str | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# pytest entry point
+# pytest entry points — one parametrised test per scenario so failures
+# point at the specific tool surface that broke.
 # ---------------------------------------------------------------------------
 
-def test_mcp_smoke():
-    """Pytest wrapper — asserts exit code 0."""
-    rc = run_smoke_test()
-    assert rc == 0, "MCP smoke test failed — see stdout for details"
+import pytest
+
+
+@pytest.mark.parametrize("scenario", sorted(SCENARIOS.keys()))
+def test_mcp_smoke(scenario: str) -> None:
+    """Pytest wrapper — asserts exit code 0 for each scenario."""
+    rc = run_smoke_test(scenario=scenario)
+    assert rc == 0, f"MCP smoke test failed for scenario={scenario!r} — see stdout"
 
 
 # ---------------------------------------------------------------------------
-# Direct execution
+# Direct execution — run both scenarios; exit non-zero if either fails
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    sys.exit(run_smoke_test())
+    exit_code = 0
+    for _scenario in sorted(SCENARIOS.keys()):
+        rc = run_smoke_test(scenario=_scenario)
+        if rc != 0:
+            exit_code = rc
+    sys.exit(exit_code)

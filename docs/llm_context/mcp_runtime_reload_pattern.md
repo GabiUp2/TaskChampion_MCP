@@ -1,5 +1,10 @@
 # MCP Runtime Reload Pattern — IDE Agent Handoff
 
+> **Status:** Superseded by [ADR 19](../adrs/ADRs.md#adr-19-runtime-reload--stable-tool-surface--runtime-state-checks--reload_configuration-tool)
+> as of v0.3.2. This document is preserved verbatim because it captures the original
+> hands-on framing that the ADR formalises; future contributors should read ADR 19
+> first and use this doc only for the worked examples / pseudo-code at the bottom.
+
 ## Context
 
 TaskChampion MCP currently has a first-run/onboarding flow where the server exposes onboarding tools until a schema is selected or generated. After selecting a preset such as `authors_custom_example`, the config is written correctly, but the running MCP process may still expose only the onboarding tool surface until the MCP host is restarted.

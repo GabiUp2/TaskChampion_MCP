@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from taskchampion_mcp.config import Role, ServerConfig
+from taskchampion_mcp.rate_limiter import RateLimiter
 from taskchampion_mcp.schema import TaskSchema
 from taskchampion_mcp.server import (
     _JsonLineFormatter,
@@ -84,6 +85,14 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
         task=MagicMock(),
         timew=MagicMock(),
         audit=MagicMock(),
+        # _audit_call calls limiter.check_and_record; use a real limiter with
+        # generous bounds so onboarding tools execute normally (rate-limit
+        # behaviour itself is covered in test_observability).
+        limiter=RateLimiter(
+            ops_per_minute=10_000,
+            ops_per_hour=10_000,
+            creates_per_hour=10_000,
+        ),
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_get_initialization_status",
@@ -94,7 +103,7 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
         lambda _status: {"success": True, "options": []},
     )
     monkeypatch.setattr(
-        "taskchampion_mcp.server.onboarding_analyse_existing_tasks",
+        "taskchampion_mcp.server.onboarding_analyze_existing_tasks",
         lambda _task: {"success": True},
     )
     monkeypatch.setattr(
@@ -123,7 +132,7 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_taxonomy_path",
-        lambda _path: {"success": True, "code": "ok"},
+        lambda _path, **_kw: {"success": True, "code": "ok"},
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_role",
@@ -162,6 +171,13 @@ def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.M
         timew=object(),
         config=ServerConfig(),
         audit=MagicMock(),
+        # _audit_call (used by the reconfigure tools registered alongside
+        # contributor tools) needs limiter.check_and_record.
+        limiter=RateLimiter(
+            ops_per_minute=10_000,
+            ops_per_hour=10_000,
+            creates_per_hour=10_000,
+        ),
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_active_schema",
@@ -169,7 +185,7 @@ def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.M
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_taxonomy_path",
-        lambda _path: {"success": True, "code": "ok"},
+        lambda _path, **_kw: {"success": True, "code": "ok"},
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_role",

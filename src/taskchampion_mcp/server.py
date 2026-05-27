@@ -15,9 +15,13 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
@@ -31,22 +35,22 @@ from taskchampion_mcp.config import (
     load_config_with_sources,
 )
 from taskchampion_mcp.onboarding import (
-    analyse_existing_tasks as onboarding_analyse_existing_tasks,
+    analyze_existing_tasks as onboarding_analyze_existing_tasks,
 )
 from taskchampion_mcp.onboarding import (
-    analyse_taxonomy_file as onboarding_analyze_taxonomy_file,
+    analyze_taxonomy_file as onboarding_analyze_taxonomy_file,
 )
 from taskchampion_mcp.onboarding import (
     generate_schema_preview as onboarding_generate_schema_preview,
 )
 from taskchampion_mcp.onboarding import (
-    get_initialisation_status as onboarding_get_initialization_status,
+    get_initialization_status as onboarding_get_initialization_status,
 )
 from taskchampion_mcp.onboarding import (
     list_preset_schemas as onboarding_list_preset_schemas,
 )
 from taskchampion_mcp.onboarding import (
-    propose_initialisation_options as onboarding_propose_initialization_options,
+    propose_initialization_options as onboarding_propose_initialization_options,
 )
 from taskchampion_mcp.onboarding import (
     reconfigure_active_schema as onboarding_reconfigure_active_schema,
@@ -63,7 +67,7 @@ from taskchampion_mcp.onboarding import (
 from taskchampion_mcp.onboarding import (
     use_preset_schema as onboarding_use_preset_schema,
 )
-from taskchampion_mcp.rate_limiter import RateLimiter
+from taskchampion_mcp.rate_limiter import RateLimiter, RateLimitError
 from taskchampion_mcp.schema import TaskSchema, load_schema
 from taskchampion_mcp.tools import ToolRegistry
 
@@ -231,12 +235,160 @@ def create_server(
 
 
 # ---------------------------------------------------------------------------
+# Audit-log helper for onboarding + reconfigure tools
+# ---------------------------------------------------------------------------
+#
+# Onboarding and reconfigure tools call onboarding.* functions directly rather
+# than going through ToolRegistry, so they don't get audit logging "for free"
+# the way contributor/generator/manager tools do.  ``_audit_call`` is the
+# missing piece — wrap any callable that returns a result-dict and it emits
+# exactly one audit entry per invocation (success, refusal, or exception).
+#
+# Per ADR 13 the audit log is the queryable source of truth for "what did the
+# LLM do".  ADR 17 specifically requires every config-mutating reconfigure
+# call to leave a trail.  v0.3.2 closes audit finding #3 by extending the
+# trail to onboarding tools as well, including the two mutating ones
+# (save_initial_schema, use_preset_schema) which had no record before.
+
+# Curated set of small result-dict keys safe to copy into the audit log's
+# ``result`` summary field.  Excludes large structures (schema_toml, fields,
+# options, presets array) that would blow past the audit log's 500-char
+# truncation and offer no query value.
+_AUDIT_SUMMARY_KEYS = (
+    "active_role",
+    "config_file",
+    "config_updated",
+    "copied_to",
+    "current_role",
+    "custom_schema_configured",
+    "custom_schema_exists",
+    "error_code",
+    "field_count",
+    "initialised",
+    "needs_onboarding",
+    "needs_role_selection",
+    "new_role",
+    "preset_count",
+    "preset_name",
+    "previous_role",
+    "recommended_next_action",
+    "requested_role",
+    "restart_required",
+    "role",
+    "role_configured",
+    "schema_name",
+    "schema_path",
+    "task_count",
+    "taxonomy_configured",
+    "taxonomy_exists",
+    "taxonomy_path",
+)
+
+
+def _audit_call(
+    reg: ToolRegistry,
+    tool_name: str,
+    params: dict[str, Any],
+    fn: "Callable[[], dict[str, Any]]",
+) -> dict[str, Any]:
+    """Rate-limit + run ``fn`` + audit-log the call.
+
+    Returns ``fn``'s result dict (or re-raises any exception).  Emits exactly
+    one ``audit.log`` entry per invocation with:
+
+    * ``tool_name`` and curated ``parameters`` (long string values truncated;
+      configured ``redacted_fields`` masked by AuditLogger)
+    * ``result`` — a JSON object built from ``_AUDIT_SUMMARY_KEYS``, dropping
+      large nested payloads that have no query value
+    * ``result_code`` — taken from ``result["code"]`` or
+      ``result["error_code"]``; defaults to ``"ok"`` / ``"internal_error"``
+    * ``success`` and ``duration_ms``
+    * ``error`` — exception message or, on a logical failure, the result's
+      ``message`` field
+
+    Rate limiting (ADR 9, audit finding #4 / v0.3.2):  the configured
+    sliding-window limits apply uniformly to every onboarding and reconfigure
+    tool call, the same way they do to role-tier tools via
+    ToolRegistry._guard_rate.  Without this, a misbehaving LLM in a loop
+    could rewrite config.toml or call status repeatedly at disk-I/O speed.
+    On limit-exceeded, returns a structured ``{"error": True, "code":
+    "rate_limit", ...}`` envelope (per ADR 14) and audit-logs the refusal —
+    the wrapped ``fn`` is never executed.
+    """
+    t0 = time.monotonic()
+
+    # --- Rate-limit check (returns a structured envelope on refusal) -------
+    try:
+        reg.limiter.check_and_record(is_create=False)
+    except RateLimitError as exc:
+        refusal: dict[str, Any] = {
+            "error": True,
+            "code": "rate_limit",
+            "message": str(exc),
+            "details": {
+                "bucket": exc.bucket,
+                "limit": exc.limit,
+                "retry_after_s": exc.window_seconds,
+            },
+        }
+        reg.audit.log(
+            tool_name=tool_name,
+            parameters=params,
+            result=json.dumps(
+                {"bucket": exc.bucket, "limit": exc.limit},
+                default=str,
+            ),
+            result_code="rate_limit",
+            success=False,
+            duration_ms=(time.monotonic() - t0) * 1000.0,
+            error=str(exc),
+        )
+        return refusal
+
+    # --- Normal path -------------------------------------------------------
+    result: dict[str, Any] | None = None
+    error_msg: str | None = None
+    try:
+        result = fn()
+        return result
+    except Exception as exc:  # noqa: BLE001 — re-raised after audit
+        error_msg = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        duration_ms = (time.monotonic() - t0) * 1000.0
+        ok = bool(isinstance(result, dict) and result.get("success"))
+        summary: dict[str, Any] = {}
+        result_code: str | None = None
+        if isinstance(result, dict):
+            summary = {k: result.get(k) for k in _AUDIT_SUMMARY_KEYS if k in result}
+            # Prefer an explicit `code` field; fall back to `error_code` for
+            # refusal-class results (role_elevation_forbidden etc).
+            result_code = result.get("code") or result.get("error_code")
+            if not ok and error_msg is None:
+                error_msg = result.get("message") or "unknown error"
+        reg.audit.log(
+            tool_name=tool_name,
+            parameters=params,
+            result=json.dumps(summary, default=str) if summary else "",
+            result_code=result_code,
+            success=ok and error_msg is None,
+            duration_ms=duration_ms,
+            error=error_msg,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
 
 
 def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
-    """Register first-run onboarding tools."""
+    """Register first-run onboarding tools.
+
+    Every tool wraps its onboarding.* call with ``_audit_call`` so the audit
+    trail captures schema/role choices and parse errors equally — closes
+    audit finding #3 (v0.3.2).
+    """
 
     @mcp.tool()
     def get_initialization_status(project_dir: str = "") -> str:
@@ -245,14 +397,16 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Use this before task creation/modification if the active schema may be
         the bundled minimal default rather than a user-specific taxonomy.
         """
-        return json.dumps(
-            onboarding_get_initialization_status(
+        params = {"project_dir": project_dir or None}
+        return json.dumps(_audit_call(
+            reg, "get_initialization_status", params,
+            lambda: onboarding_get_initialization_status(
                 config=reg.config,
                 task_cli=reg.task,
                 timew_cli=reg.timew,
                 project_dir=project_dir or None,
-            )
-        )
+            ),
+        ))
 
     @mcp.tool()
     def propose_initialization_options(project_dir: str = "") -> str:
@@ -261,13 +415,18 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Options include using a taxonomy file, inferring from existing tasks,
         combining both, or selecting a bundled preset.
         """
-        status = onboarding_get_initialization_status(
-            config=reg.config,
-            task_cli=reg.task,
-            timew_cli=reg.timew,
-            project_dir=project_dir or None,
-        )
-        return json.dumps(onboarding_propose_initialization_options(status))
+        params = {"project_dir": project_dir or None}
+
+        def _run() -> dict[str, Any]:
+            status = onboarding_get_initialization_status(
+                config=reg.config,
+                task_cli=reg.task,
+                timew_cli=reg.timew,
+                project_dir=project_dir or None,
+            )
+            return onboarding_propose_initialization_options(status)
+
+        return json.dumps(_audit_call(reg, "propose_initialization_options", params, _run))
 
     @mcp.tool()
     def analyze_existing_tasks_for_schema() -> str:
@@ -276,7 +435,10 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         This is read-only. It returns field occurrence ratios, likely enum
         values, likely required fields, projects, tags, and detected UDAs.
         """
-        return json.dumps(onboarding_analyse_existing_tasks(reg.task))
+        return json.dumps(_audit_call(
+            reg, "analyze_existing_tasks_for_schema", {},
+            lambda: onboarding_analyze_existing_tasks(reg.task),
+        ))
 
     @mcp.tool()
     def analyze_taxonomy_file(path: str) -> str:
@@ -285,7 +447,10 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         This is read-only. It extracts fields, descriptions, allowed values,
         conditional requirements, and phase transitions when possible.
         """
-        return json.dumps(onboarding_analyze_taxonomy_file(path))
+        return json.dumps(_audit_call(
+            reg, "analyze_taxonomy_file", {"path": path},
+            lambda: onboarding_analyze_taxonomy_file(path),
+        ))
 
     @mcp.tool()
     def generate_initial_schema_preview(
@@ -299,15 +464,21 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         taxonomy Markdown file. The returned schema_toml should be reviewed by
         the user before calling save_initial_schema.
         """
-        return json.dumps(
-            onboarding_generate_schema_preview(
+        params = {
+            "taxonomy_path": taxonomy_path or None,
+            "project_dir": project_dir or None,
+            "schema_name": schema_name or None,
+        }
+        return json.dumps(_audit_call(
+            reg, "generate_initial_schema_preview", params,
+            lambda: onboarding_generate_schema_preview(
                 config=reg.config,
                 task_cli=reg.task,
                 taxonomy_path=taxonomy_path or None,
                 project_dir=project_dir or None,
                 schema_name=schema_name or None,
-            )
-        )
+            ),
+        ))
 
     @mcp.tool()
     def save_initial_schema(
@@ -330,16 +501,26 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         leaves onboarding mode on next restart. Without persisting a role the
         server stays stuck on the onboarding tool surface.
         """
-        return json.dumps(
-            onboarding_save_initial_schema(
+        # Don't audit-log the full schema_toml blob — it can be many KB.
+        params = {
+            "schema_toml_length": len(schema_toml),
+            "taxonomy_path": taxonomy_path or None,
+            "output_path": output_path or None,
+            "role": role or None,
+            "overwrite": overwrite,
+            "update_config": update_config,
+        }
+        return json.dumps(_audit_call(
+            reg, "save_initial_schema", params,
+            lambda: onboarding_save_initial_schema(
                 schema_toml=schema_toml,
                 taxonomy_path=taxonomy_path or None,
                 output_path=output_path or None,
                 role=role or None,
                 overwrite=overwrite,
                 update_config=update_config,
-            )
-        )
+            ),
+        ))
 
     @mcp.tool()
     def list_preset_schemas() -> str:
@@ -350,7 +531,10 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         before calling use_preset_schema so the user can see what is
         available without you guessing the preset names.
         """
-        return json.dumps(onboarding_list_preset_schemas())
+        return json.dumps(_audit_call(
+            reg, "list_preset_schemas", {},
+            lambda: onboarding_list_preset_schemas(),
+        ))
 
     @mcp.tool()
     def use_preset_schema(
@@ -379,8 +563,18 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         leaves onboarding mode on next restart. Without persisting a role the
         server stays stuck on the onboarding tool surface.
         """
-        return json.dumps(
-            onboarding_use_preset_schema(
+        params = {
+            "preset_name": preset_name,
+            "taxonomy_path": taxonomy_path or None,
+            "output_path": output_path or None,
+            "role": role or None,
+            "copy": copy,
+            "overwrite": overwrite,
+            "update_config": update_config,
+        }
+        return json.dumps(_audit_call(
+            reg, "use_preset_schema", params,
+            lambda: onboarding_use_preset_schema(
                 preset_name=preset_name,
                 taxonomy_path=taxonomy_path or None,
                 output_path=output_path or None,
@@ -388,8 +582,8 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 copy=copy,
                 overwrite=overwrite,
                 update_config=update_config,
-            )
-        )
+            ),
+        ))
 
 
 def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
@@ -537,39 +731,28 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     # is forbidden by design.  All three audit-log every successful and
     # every failed call so the trail of LLM-driven config mutations is
     # queryable.  See ADR 17 for the threat model.
+    #
+    # Uses the shared ``_audit_call`` helper (consolidated in v0.3.2 — the
+    # bespoke ``_audit_reconfigure`` that lived here was retired so reconfigure
+    # tools and onboarding tools share one audit envelope).
     # -----------------------------------------------------------------------
-
-    def _audit_reconfigure(tool_name: str, params: dict, result: dict) -> None:
-        """Emit one audit-log entry per reconfigure call (success or error)."""
-        ok = bool(result.get("success"))
-        summary_keys = (
-            "previous_role",
-            "new_role",
-            "schema_name",
-            "schema_path",
-            "taxonomy_path",
-            "error_code",
-        )
-        summary = {k: result.get(k) for k in summary_keys if k in result}
-        reg.audit.log(
-            tool_name=tool_name,
-            parameters=params,
-            result=json.dumps(summary, default=str),
-            result_code=result.get("code"),
-            success=ok,
-            error=None if ok else (result.get("message") or "unknown error"),
-        )
 
     @mcp.tool()
     def set_active_schema(
         schema_name: str = "",
         schema_path: str = "",
+        dry_run: bool = False,
     ) -> str:
         """Switch the active task schema.
 
         Exactly one of ``schema_name`` (a bundled preset such as
         'minimal' / 'gtd' / 'kanban' / 'scrum') or ``schema_path``
         (an absolute path to a custom TOML schema) must be provided.
+
+        Set ``dry_run=true`` to validate the inputs and preview the
+        config write without touching ``config.toml`` — useful for
+        confirming a preset name spells correctly or a schema_path
+        exists before committing. Returns code="dry_run" per ADR 14.
 
         Updates config.toml; takes effect on next MCP server restart
         (runtime reload is not yet implemented). Does not mutate any
@@ -580,16 +763,19 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         params = {
             "schema_name": schema_name or None,
             "schema_path": schema_path or None,
+            "dry_run": dry_run,
         }
-        result = onboarding_reconfigure_active_schema(
-            schema_name=schema_name or None,
-            schema_path=schema_path or None,
-        )
-        _audit_reconfigure("set_active_schema", params, result)
-        return json.dumps(result)
+        return json.dumps(_audit_call(
+            reg, "set_active_schema", params,
+            lambda: onboarding_reconfigure_active_schema(
+                schema_name=schema_name or None,
+                schema_path=schema_path or None,
+                dry_run=dry_run,
+            ),
+        ))
 
     @mcp.tool()
-    def set_taxonomy_path(path: str) -> str:
+    def set_taxonomy_path(path: str, dry_run: bool = False) -> str:
         """Update the taxonomy file path persisted in config.toml.
 
         The taxonomy informs the model's interpretation of task
@@ -597,22 +783,33 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         the tool refuses non-existent or directory targets to prevent
         silently disabling taxonomy awareness.
 
+        Set ``dry_run=true`` to validate the path and preview the
+        config write without touching ``config.toml``. Returns
+        code="dry_run" per ADR 14.
+
         Takes effect on next MCP server restart. Available at
         CONTRIBUTOR level (informational input, not a capability).
         """
-        params = {"path": path}
-        result = onboarding_reconfigure_taxonomy_path(path)
-        _audit_reconfigure("set_taxonomy_path", params, result)
-        return json.dumps(result)
+        return json.dumps(_audit_call(
+            reg, "set_taxonomy_path", {"path": path, "dry_run": dry_run},
+            lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
+        ))
 
     @mcp.tool()
-    def set_role(target_role: str) -> str:
+    def set_role(target_role: str, dry_run: bool = False) -> str:
         """Change the persisted MCP role — DOWNGRADE ONLY.
 
         Valid roles: CONTRIBUTOR, GENERATOR, MANAGER (cumulative;
         see ADR 5). This tool will set the persisted role to
         ``target_role`` IF AND ONLY IF its level is less than or
         equal to the currently-loaded role.
+
+        Set ``dry_run=true`` to validate inputs (including the
+        elevation refusal check) and preview the config write without
+        touching ``config.toml``. Refusal-class errors
+        (role_elevation_forbidden) trigger regardless of dry_run — a
+        forbidden elevation is forbidden whether or not the LLM was
+        just "asking". Returns code="dry_run" on legitimate previews.
 
         Self-elevation via MCP is forbidden by design (ADR 17).
         Attempts to elevate return a structured error with
@@ -623,13 +820,19 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Takes effect on next MCP server restart.
         """
-        params = {"target_role": target_role, "current_role": reg.config.role}
-        result = onboarding_reconfigure_role(
-            current_role=reg.config.role,
-            target_role=target_role,
-        )
-        _audit_reconfigure("set_role", params, result)
-        return json.dumps(result)
+        params = {
+            "target_role": target_role,
+            "current_role": reg.config.role,
+            "dry_run": dry_run,
+        }
+        return json.dumps(_audit_call(
+            reg, "set_role", params,
+            lambda: onboarding_reconfigure_role(
+                current_role=reg.config.role,
+                target_role=target_role,
+                dry_run=dry_run,
+            ),
+        ))
 
 
 def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
