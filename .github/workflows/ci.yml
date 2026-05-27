@@ -51,7 +51,7 @@ jobs:
       - name: Run security regression tests
         run: uv run pytest tests/security -v --tb=short
 
-      - name: Coverage report (target: 85%)
+      - name: Coverage report target 85 percent
         run: |
           uv run pytest tests/ \
             -m "not integration" \
