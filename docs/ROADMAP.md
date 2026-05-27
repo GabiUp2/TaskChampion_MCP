@@ -170,6 +170,48 @@ that lets users change schema/taxonomy/role mid-flight (downgrade only).
 
 ---
 
+## v0.3.2 — Released (audit follow-ups + CI hardening)
+
+**State described by this release:** Closes the 12 actionable items from the post-v0.3.1 design-system audit. No new protocol surface; v1.0 gates remain unchanged. PR #3 (`feature/v0.3.2_audit_followups`) merged the audit work; PR #4 (`ci-debug`) stabilised the GitHub Actions matrix on top.
+
+### Security-baseline parity for onboarding and reconfigure tools
+
+- [x] Audit-log coverage extended to all 8 onboarding tools and the 3 reconfigure tools via a shared `_audit_call` helper in `server.py` — replaces the bespoke `_audit_reconfigure` side channel with the standard ADR-13 envelope (audit finding #3)
+- [x] Sliding-window rate-limiting applied uniformly through the same `_audit_call` helper; refusals return `code: "rate_limit"` and the wrapped tool body never runs (audit finding #4)
+- [x] `dry_run=True` added to `set_active_schema`, `set_taxonomy_path`, `set_role` — validates inputs, returns a `code: "dry_run"` preview, leaves `config.toml` untouched. ADR-17 invariant pinned by test: a forbidden elevation stays forbidden even when `dry_run=True` (audit finding #6)
+
+### ADR and inventory cleanup
+
+- [x] Duplicate ADR 16 renumbered to **ADR 18** (Installation Strategy); both former-16s carry cross-reference headers so prior commit messages remain readable (audit finding #1)
+- [x] ADR 14's closed-set `code` inventory amended to include `role_elevation_forbidden`, restoring the "stable envelope" promise broken when ADR 17 added the code in v0.3.0 (audit finding #2)
+- [x] **ADR 19** added — Runtime Reload via stable tool surface + per-tool runtime state checks + `reload_configuration` tool. Status: Proposed (implementation pending). Supersedes `docs/llm_context/mcp_runtime_reload_pattern.md`. (audit finding #11)
+- [x] **ADR 20** added — Remote-host bootstrap (`scripts/setup_remote.sh`) design captured: `uv tool install` delivery, `claude mcp add` user scope, idempotent config seeding, check-only prereq policy, intentional Linux-only / Claude-Code-only scope. Status: Accepted. (audit finding #12)
+
+### Codebase hygiene
+
+- [x] British → American identifier rename completed inside `taskchampion_mcp.onboarding` and its tests — the v0.3.0 rename had stopped at the MCP-tool layer. `grep -rnE '\banalyse|initialisation' src/ tests/` now returns zero hits (audit finding #5)
+- [x] Aliased imports in `server.py` simplified now that source identifiers match MCP tool names
+
+### Test coverage
+
+- [x] Smoke test gains a second scenario (`post_onboarding`) seeding an XDG with `role + schema` and asserting the CONTRIBUTOR + reconfigure tool surface. Mutually-exclusive invariants asserted: onboarding tools MUST NOT register when the server is initialised, and vice versa (audit finding #8)
+- [x] Coverage gate held at ≥ 85 % per ADR 12 (current: 85.59 % on `src/taskchampion_mcp/`)
+
+### CI hardening (post-PR #3)
+
+- [x] Matrix jobs bootstrap a non-interactive Taskwarrior `.taskrc` (`confirmation=no`, fixed `data.location`) before any `task` invocation — prevents `task _version` from hanging on first-run prompts in clean runners
+- [x] `ruff` lint gate cleaned across `src/` and `tests/` — about 200 lines of formatting/style adjustments in `server.py`, plus smaller cleanups in `onboarding.py`, `schema.py`, and eight test files
+- [x] CI workflow now passes end-to-end on the Linux matrix
+
+### Carried over to a later release (not blocking v0.3.2 tag)
+
+- [ ] **ADR 19 implementation.** The stable-tool-surface refactor and `reload_configuration` tool are scoped as their own future PR — ADR 19 is `Proposed`, not `Accepted`.
+- [ ] Confirmation flow for `set_role` downgrades (audit finding #7) — design decision deferred; tracked in the audit's medium-priority bucket.
+- [ ] v1.0 acceptance-test items for `get_task_report` / `batch_create_tasks` / `bulk_modify` (audit finding #9) — applies at the v1.0 gate review, not v0.3.x.
+- [ ] `config.example.toml` mention of the post-onboarding reconfigure tool surface (audit finding #10) — doc-only follow-up.
+
+---
+
 ## v0.4.0 — HTTP/SSE transport and auth
 
 **Theme**: Add the second transport so ChatGPT and Codex become reachable. Stays pre-1.0 until target compatibility is verified.
