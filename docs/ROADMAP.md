@@ -170,6 +170,54 @@ that lets users change schema/taxonomy/role mid-flight (downgrade only).
 
 ---
 
+## v0.3.2 — Audit follow-ups (in progress)
+
+**Theme:** Close the gaps surfaced by the post-v0.3.1 design-system audit. Every item maps to a finding in the audit's 15-issue inventory; none are new feature work.
+
+### ADR and inventory cleanup
+
+- [ ] Renumber the duplicate ADR 16 entry (Installation Strategy) to **ADR 18**, with cross-reference notes on both former-16s so the historical numbering is traceable. (Audit finding #1, priority 1)
+- [ ] Add `role_elevation_forbidden` to ADR 14's closed-set `code` inventory. Without it the "stable envelope" promise of ADR 14 is broken since v0.3.0. (Audit finding #2, priority 2)
+
+### Security baseline parity for onboarding and reconfigure tools
+
+The audit's coverage matrix (audit-log, rate-limit, dry-run, confirmation) was lit across MANAGER but had gaps in onboarding and the new reconfigure surface. v0.3.2 closes those gaps.
+
+- [ ] Audit-log every onboarding-tool call (especially the two mutating ones: `save_initial_schema`, `use_preset_schema`). Currently the audit trail only records the *next* server boot's `audit.log_startup`, not the call that wrote the schema. (Audit finding #3, priority 3)
+- [ ] Audit-log reconfigure-tool calls through the standard `audit.log()` envelope, not the bespoke `_audit_reconfigure` side channel. (Audit finding #3, priority 3)
+- [ ] Apply rate limiting (`_guard_rate` equivalent) to onboarding and reconfigure tools so a runaway LLM cannot rewrite `config.toml` faster than disk I/O. (Audit finding #4, priority 4)
+- [ ] Add `dry_run: bool = False` to `set_active_schema` / `set_taxonomy_path` / `set_role`. Symmetry with every other write tool in the codebase. (Audit finding #6, medium)
+- [ ] Consider `require_confirmation` semantics for `set_role` downgrades. (Audit finding #7, medium — design decision recorded as a comment / ADR amendment if rejected)
+
+### Codebase hygiene
+
+- [ ] Complete the British → American identifier rename inside `taskchampion_mcp.onboarding` and its tests so the source no longer carries both spellings (`analyse_*` + 29 × `initialisation` references remain post-v0.3.1). Drop the aliasing in `server.py` imports. (Audit finding #5, priority 5)
+- [ ] Verify `config.example.toml` mentions the reconfigure-tool surface so first-time users discover `set_role` / `set_active_schema`. (Audit finding #10, low)
+
+### Test coverage
+
+- [ ] Add a second smoke-test scenario that seeds an XDG with `role=CONTRIBUTOR` + `schema=minimal` and asserts the post-onboarding tool surface (CONTRIBUTOR + reconfigure tools, no onboarding tools). The current smoke test only validates the onboarding-mode surface. (Audit finding #8, medium)
+- [ ] Extend the v1.0 acceptance test list (ROADMAP §"Per-target acceptance test") to cover `get_task_report`, `batch_create_tasks`, `bulk_modify`. (Audit finding #9, medium — tracked here, executed at v1.0 gate review)
+- [ ] Keep `pytest --cov` ≥ **85%** for `src/taskchampion_mcp/` (ADR 12 gate). Re-run after every commit in this block; tighten coverage where new code lands below threshold.
+
+### Architectural documentation
+
+- [ ] **ADR 19** — Runtime reload pattern (promote `docs/llm_context/mcp_runtime_reload_pattern.md` content into a proper ADR with the decision captured: SIGHUP-based pattern vs config-change watcher vs explicit restart-only; current status: not implemented, restart-required is the contract). (Audit finding #11, low; finding #15 ties in)
+- [ ] **ADR 20** — Remote-host bootstrap design (`scripts/setup_remote.sh`): idempotent `uv tool install` pattern, git-ref pinning vs PyPI, why no auto-prereqs by default, config seeding semantics, `claude mcp add` as the delivery contract. (Audit finding #12, low)
+
+### Exit criteria for v0.3.2
+
+A v0.3.2 release candidate is shippable when:
+
+1. All ADR-cleanup items above are merged (deduped + ADR 14 amended)
+2. Onboarding and reconfigure tools have full audit-log + rate-limit + dry-run coverage parity with MANAGER tools
+3. `grep -rn "analyse\|initialisation" src/ tests/` returns 0 hits (excluding intentional historical strings)
+4. Two smoke-test scenarios pass: onboarding-mode and post-onboarding-mode
+5. `pytest --cov` reports ≥ 85% on `src/taskchampion_mcp/`
+6. ADR 18, 19, 20 merged and cross-referenced from README + ROADMAP
+
+---
+
 ## v0.4.0 — HTTP/SSE transport and auth
 
 **Theme**: Add the second transport so ChatGPT and Codex become reachable. Stays pre-1.0 until target compatibility is verified.
