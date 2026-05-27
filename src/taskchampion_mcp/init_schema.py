@@ -2,7 +2,7 @@
 # Reviewed by: gabiup2
 # Date: 2026-05-25
 
-"""First-run schema initialisation wizard (IDEA-003) — thin CLI layer.
+"""First-run schema initialization wizard (IDEA-003) — thin CLI layer.
 
 Invoked via ``./dev.sh init`` or ``python -m taskchampion_mcp.init_schema``.
 
@@ -12,7 +12,7 @@ public API in :mod:`taskchampion_mcp.onboarding`.  That keeps the CLI wizard
 and the runtime MCP onboarding tools behaviourally identical.
 
 The wizard supports three branches, mirroring the options proposed by
-:func:`onboarding.propose_initialisation_options`:
+:func:`onboarding.propose_initialization_options`:
 
 1. Generate a schema from existing tasks and/or a taxonomy file.
 2. Pick a bundled preset (``--preset <name>`` or interactive list).
@@ -29,10 +29,10 @@ from taskchampion_mcp.cli import TaskwarriorCLI
 from taskchampion_mcp.config import Role, load_config
 from taskchampion_mcp.onboarding import (
     _default_schema_path,
-    analyse_existing_tasks,
+    analyze_existing_tasks,
     default_schema_name_for_source,
     generate_schema_preview,
-    get_initialisation_status,
+    get_initialization_status,
     list_preset_schemas,
     resolve_taxonomy_path,
     save_initial_schema,
@@ -180,7 +180,7 @@ def _run_generate_branch(
         _info("Proceeding without taxonomy file.")
 
     # Sanity check: warn early if neither tasks nor taxonomy are available.
-    task_report = analyse_existing_tasks(task_cli)
+    task_report = analyze_existing_tasks(task_cli)
     task_count = int(task_report.get("task_count") or 0)
     if task_report.get("error"):
         _warn(f"Task export failed: {task_report.get('message')}")
@@ -347,7 +347,7 @@ def run_init(
     copy_preset: bool = False,
     non_interactive: bool = False,
 ) -> bool:
-    """Run the first-time schema initialisation wizard.
+    """Run the first-time schema initialization wizard.
 
     Returns True if a schema was successfully selected/generated and the
     config updated.
@@ -367,7 +367,7 @@ def run_init(
         binary=config.task_binary,
         override_rc=config.taskwarrior_override_rc,
     )
-    status = get_initialisation_status(
+    status = get_initialization_status(
         config=config,
         task_cli=task_cli,
         project_dir=project_dir,
@@ -437,7 +437,7 @@ def _build_parser() -> Any:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="TaskChampion MCP — First-run schema initialisation",
+        description="TaskChampion MCP — First-run schema initialization",
     )
     parser.add_argument(
         "--project-dir",

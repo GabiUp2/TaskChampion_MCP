@@ -14,13 +14,13 @@ import pytest
 from taskchampion_mcp.config import Role, ServerConfig, load_config
 from taskchampion_mcp.onboarding import (
     _ROLE_ELEVATION_FORBIDDEN_CODE,
-    analyse_existing_tasks,
-    analyse_taxonomy_file,
+    analyze_existing_tasks,
+    analyze_taxonomy_file,
     default_schema_name_for_source,
     generate_schema_preview,
-    get_initialisation_status,
+    get_initialization_status,
     list_preset_schemas,
-    propose_initialisation_options,
+    propose_initialization_options,
     reconfigure_active_schema,
     reconfigure_role,
     reconfigure_taxonomy_path,
@@ -132,7 +132,7 @@ T-shirt size estimate.
 
 def test_status_needs_onboarding_when_only_minimal_schema(sample_tasks: list[dict[str, Any]]):
     config = ServerConfig(schema_name="minimal", schema_path=None, taxonomy_path=None)
-    status = get_initialisation_status(config, FakeTaskCLI(sample_tasks), FakeTimewCLI(True))
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks), FakeTimewCLI(True))
 
     assert status["initialised"] is False
     assert status["needs_onboarding"] is True
@@ -148,7 +148,7 @@ def test_status_initialised_with_existing_schema(
     schema.write_text("[meta]\nname = 'x'\n", encoding="utf-8")
     config = ServerConfig(schema_path=str(schema))
 
-    status = get_initialisation_status(config, FakeTaskCLI(sample_tasks))
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks))
 
     assert status["initialised"] is True
     assert status["needs_onboarding"] is False
@@ -164,7 +164,7 @@ def test_propose_options_recommends_taxonomy_when_available(taxonomy_file: Path)
         "detected_taxonomy_paths": [str(taxonomy_file)],
     }
 
-    options = propose_initialisation_options(status)
+    options = propose_initialization_options(status)
     by_id = {item["id"]: item for item in options["options"]}
 
     assert by_id["use_taxonomy"]["recommended"] is True
@@ -172,8 +172,8 @@ def test_propose_options_recommends_taxonomy_when_available(taxonomy_file: Path)
     assert by_id["infer_from_tasks"]["recommended"] is False
 
 
-def test_analyse_existing_tasks_detects_udas(sample_tasks: list[dict[str, Any]]):
-    result = analyse_existing_tasks(FakeTaskCLI(sample_tasks))
+def test_analyze_existing_tasks_detects_udas(sample_tasks: list[dict[str, Any]]):
+    result = analyze_existing_tasks(FakeTaskCLI(sample_tasks))
 
     assert result["success"] is True
     assert result["task_count"] == 2
@@ -182,15 +182,15 @@ def test_analyse_existing_tasks_detects_udas(sample_tasks: list[dict[str, Any]])
     assert result["fields"]["scope"]["inferred_values"] == ["personal"]
 
 
-def test_analyse_existing_tasks_reports_export_error():
-    result = analyse_existing_tasks(FakeTaskCLI(error=RuntimeError("boom")))
+def test_analyze_existing_tasks_reports_export_error():
+    result = analyze_existing_tasks(FakeTaskCLI(error=RuntimeError("boom")))
 
     assert result["error"] is True
     assert "boom" in result["message"]
 
 
-def test_analyse_taxonomy_file_extracts_fields(taxonomy_file: Path):
-    result = analyse_taxonomy_file(str(taxonomy_file))
+def test_analyze_taxonomy_file_extracts_fields(taxonomy_file: Path):
+    result = analyze_taxonomy_file(str(taxonomy_file))
 
     assert result["success"] is True
     assert "scope" in result["fields"]
@@ -295,7 +295,7 @@ def test_generate_schema_preview_uses_source_aware_default(
 
 def test_status_includes_available_presets(sample_tasks: list[dict[str, Any]]):
     config = ServerConfig()
-    status = get_initialisation_status(config, FakeTaskCLI(sample_tasks))
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks))
     assert "minimal" in status["available_presets"]
     # Sanity check that the listing matches the bundled directory contents.
     assert set(status["available_presets"]) >= {"minimal", "gtd", "kanban", "scrum"}
@@ -316,7 +316,7 @@ def test_propose_options_advertises_preset_tools():
         "available_presets": ["minimal", "gtd"],
     }
 
-    options = propose_initialisation_options(status)
+    options = propose_initialization_options(status)
     by_id = {item["id"]: item for item in options["options"]}
 
     preset_option = by_id["use_builtin_preset"]
@@ -334,7 +334,7 @@ def test_propose_options_lists_followup_tools_for_every_option(tmp_path: Path):
         "detected_taxonomy_paths": [str(tmp_path / "TAXONOMY.md")],
     }
 
-    options = propose_initialisation_options(status)
+    options = propose_initialization_options(status)
     for item in options["options"]:
         assert "next_tools" in item, item
         assert item["next_tools"], item
@@ -662,7 +662,7 @@ def test_onboarding_round_trip_satisfies_requires_onboarding():
 
 def test_status_surfaces_role_state_for_unconfigured_role():
     config = ServerConfig()  # explicit_role_configured defaults to False
-    status = get_initialisation_status(config, FakeTaskCLI([]))
+    status = get_initialization_status(config, FakeTaskCLI([]))
     assert status["role_configured"] is False
     assert status["needs_role_selection"] is True
     assert status["active_role"] == Role.CONTRIBUTOR
@@ -679,7 +679,7 @@ def test_status_surfaces_role_state_when_configured(tmp_path: Path):
         explicit_schema_configured=True,
     )
 
-    status = get_initialisation_status(config, FakeTaskCLI([]))
+    status = get_initialization_status(config, FakeTaskCLI([]))
     assert status["role_configured"] is True
     assert status["needs_role_selection"] is False
     assert status["active_role"] == Role.MANAGER
@@ -698,7 +698,7 @@ def test_propose_options_includes_role_choice_block():
         "needs_role_selection": True,
     }
 
-    options = propose_initialisation_options(status)
+    options = propose_initialization_options(status)
 
     assert "roles" in options
     roles_block = options["roles"]

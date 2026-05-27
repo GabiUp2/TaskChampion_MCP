@@ -51,7 +51,7 @@ def test_run_generate_branch_fails_without_tasks_or_taxonomy(monkeypatch: pytest
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.resolve_taxonomy_path", lambda **_kw: None)
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.analyse_existing_tasks",
+        "taskchampion_mcp.init_schema.analyze_existing_tasks",
         lambda _task_cli: {"success": True, "task_count": 0},
     )
 
@@ -71,7 +71,7 @@ def test_run_generate_branch_preview_failure(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.resolve_taxonomy_path", lambda **_kw: None)
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.analyse_existing_tasks",
+        "taskchampion_mcp.init_schema.analyze_existing_tasks",
         lambda _task_cli: {"success": True, "task_count": 1},
     )
     monkeypatch.setattr(
@@ -96,7 +96,7 @@ def test_run_generate_branch_success(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.resolve_taxonomy_path", lambda **_kw: None)
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.analyse_existing_tasks",
+        "taskchampion_mcp.init_schema.analyze_existing_tasks",
         lambda _task_cli: {"success": True, "task_count": 1},
     )
     monkeypatch.setattr(
@@ -140,7 +140,7 @@ def test_run_generate_branch_interactive_taxonomy_override_and_overwrite(
         lambda **_kw: detected,
     )
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.analyse_existing_tasks",
+        "taskchampion_mcp.init_schema.analyze_existing_tasks",
         lambda _task_cli: {"success": True, "task_count": 1},
     )
     monkeypatch.setattr(
@@ -260,7 +260,7 @@ def test_run_init_already_initialised_non_interactive_returns_false(
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.TaskwarriorCLI", lambda **_kw: MagicMock())
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.get_initialisation_status",
+        "taskchampion_mcp.init_schema.get_initialization_status",
         lambda **_kw: {
             "needs_onboarding": False,
             "custom_schema_path": "/tmp/schema.toml",
@@ -275,7 +275,7 @@ def test_run_init_calls_preset_branch_when_preset_given(monkeypatch: pytest.Monk
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.TaskwarriorCLI", lambda **_kw: MagicMock())
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.get_initialisation_status",
+        "taskchampion_mcp.init_schema.get_initialization_status",
         lambda **_kw: {"needs_onboarding": True, "role_configured": False},
     )
     monkeypatch.setattr(
@@ -297,7 +297,7 @@ def test_run_init_calls_generate_branch_by_default(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.TaskwarriorCLI", lambda **_kw: MagicMock())
     monkeypatch.setattr(
-        "taskchampion_mcp.init_schema.get_initialisation_status",
+        "taskchampion_mcp.init_schema.get_initialization_status",
         lambda **_kw: {"needs_onboarding": True, "role_configured": False},
     )
     monkeypatch.setattr(

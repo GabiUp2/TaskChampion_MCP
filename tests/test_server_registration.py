@@ -103,7 +103,7 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
         lambda _status: {"success": True, "options": []},
     )
     monkeypatch.setattr(
-        "taskchampion_mcp.server.onboarding_analyse_existing_tasks",
+        "taskchampion_mcp.server.onboarding_analyze_existing_tasks",
         lambda _task: {"success": True},
     )
     monkeypatch.setattr(

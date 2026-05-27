@@ -26,8 +26,8 @@ Design constraints:
 
 Onboarding flow (user-facing summary):
 
-1. :func:`get_initialisation_status` — read-only status (exposed as `get_initialization_status`).
-2. :func:`propose_initialisation_options` — present choices to the user
+1. :func:`get_initialization_status` — read-only status (exposed as `get_initialization_status`).
+2. :func:`propose_initialization_options` — present choices to the user
    (exposed as `propose_initialization_options`).
 3. Branch on the chosen option:
    - ``use_taxonomy`` / ``infer_from_tasks`` / ``hybrid_taxonomy_plus_tasks``:
@@ -175,7 +175,7 @@ def _safe_task_count(task_cli: TaskwarriorCLI) -> tuple[int, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def get_initialisation_status(
+def get_initialization_status(
     config: ServerConfig,
     task_cli: TaskwarriorCLI,
     timew_cli: TimewarriorCLI | None = None,
@@ -334,8 +334,8 @@ def _role_choice_block(status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
-    """Build user-facing onboarding options from ``get_initialisation_status``.
+def propose_initialization_options(status: dict[str, Any]) -> dict[str, Any]:
+    """Build user-facing onboarding options from ``get_initialization_status``.
 
     Each option is self-describing so the calling LLM can present a clean
     menu to the user without further introspection.
@@ -423,7 +423,7 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def analyse_existing_tasks(task_cli: TaskwarriorCLI) -> dict[str, Any]:
+def analyze_existing_tasks(task_cli: TaskwarriorCLI) -> dict[str, Any]:
     """Analyse existing tasks and return field/value statistics for schema design."""
     tasks, error = _safe_export_tasks(task_cli)
     if error:
@@ -453,7 +453,7 @@ def analyse_existing_tasks(task_cli: TaskwarriorCLI) -> dict[str, Any]:
     }
 
 
-def analyse_taxonomy_file(path: str) -> dict[str, Any]:
+def analyze_taxonomy_file(path: str) -> dict[str, Any]:
     """Parse a taxonomy Markdown file and return extracted semantics."""
     taxonomy_path = Path(path).expanduser().resolve()
     if not taxonomy_path.exists():
@@ -1131,14 +1131,14 @@ def reconfigure_role(
 
 
 __all__ = [
-    "analyse_existing_tasks",
-    "analyse_taxonomy_file",
+    "analyze_existing_tasks",
+    "analyze_taxonomy_file",
     "default_schema_name_for_source",
     "detect_taxonomy_files",
     "generate_schema_preview",
-    "get_initialisation_status",
+    "get_initialization_status",
     "list_preset_schemas",
-    "propose_initialisation_options",
+    "propose_initialization_options",
     "reconfigure_active_schema",
     "reconfigure_role",
     "reconfigure_taxonomy_path",

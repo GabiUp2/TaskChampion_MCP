@@ -35,22 +35,22 @@ from taskchampion_mcp.config import (
     load_config_with_sources,
 )
 from taskchampion_mcp.onboarding import (
-    analyse_existing_tasks as onboarding_analyse_existing_tasks,
+    analyze_existing_tasks as onboarding_analyze_existing_tasks,
 )
 from taskchampion_mcp.onboarding import (
-    analyse_taxonomy_file as onboarding_analyze_taxonomy_file,
+    analyze_taxonomy_file as onboarding_analyze_taxonomy_file,
 )
 from taskchampion_mcp.onboarding import (
     generate_schema_preview as onboarding_generate_schema_preview,
 )
 from taskchampion_mcp.onboarding import (
-    get_initialisation_status as onboarding_get_initialization_status,
+    get_initialization_status as onboarding_get_initialization_status,
 )
 from taskchampion_mcp.onboarding import (
     list_preset_schemas as onboarding_list_preset_schemas,
 )
 from taskchampion_mcp.onboarding import (
-    propose_initialisation_options as onboarding_propose_initialization_options,
+    propose_initialization_options as onboarding_propose_initialization_options,
 )
 from taskchampion_mcp.onboarding import (
     reconfigure_active_schema as onboarding_reconfigure_active_schema,
@@ -437,7 +437,7 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         """
         return json.dumps(_audit_call(
             reg, "analyze_existing_tasks_for_schema", {},
-            lambda: onboarding_analyse_existing_tasks(reg.task),
+            lambda: onboarding_analyze_existing_tasks(reg.task),
         ))
 
     @mcp.tool()
