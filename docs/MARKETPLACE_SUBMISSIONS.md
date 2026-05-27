@@ -41,10 +41,10 @@ None (local server)
 - `create_task` — Create a new task with schema validation
 - `complete_task` — Mark task as done
 - `delete_task` — Delete a task
-- `undo` — Undo last Taskwarrior operation
-- `sync` — Trigger task sync via TaskChampion
-- `timew_status` — Check Timewarrior tracking status
-- `timew_summary` — Get time tracking summary
+- `undo_last_action` — Undo last Taskwarrior operation
+- `sync_tasks` — Trigger task sync via TaskChampion
+- `get_time_status` — Check Timewarrior tracking status
+- `get_time_summary` — Get time tracking summary
 - `timew_start` — Start time tracking
 - `timew_stop` — Stop time tracking
 

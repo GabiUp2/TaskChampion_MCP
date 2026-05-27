@@ -6,7 +6,7 @@
 # Role determines which MCP tools are available to the LLM.
 # CONTRIBUTOR — read, annotate, modify existing tasks
 # GENERATOR   — + create new tasks
-# MANAGER     — + complete, delete, undo, sync
+# MANAGER     — + complete, delete, undo_last_action, sync_tasks
 role = "CONTRIBUTOR"
 
 # Schema preset name (from schemas/ directory) or path to a custom .toml file.

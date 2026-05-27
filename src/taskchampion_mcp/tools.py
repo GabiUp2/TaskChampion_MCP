@@ -18,7 +18,7 @@ from typing import Any
 from taskchampion_mcp.audit import AuditLogger
 from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
 from taskchampion_mcp.config import ServerConfig
-from taskchampion_mcp.rate_limiter import RateLimitError, RateLimiter
+from taskchampion_mcp.rate_limiter import RateLimiter, RateLimitError
 from taskchampion_mcp.sanitizer import (
     SanitizationError,
     sanitize_annotation,
@@ -32,10 +32,27 @@ from taskchampion_mcp.sanitizer import (
 )
 from taskchampion_mcp.schema import TaskSchema, validate_task
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_SUCCESS_CODES = {"ok", "dry_run", "confirmation_required"}
+_ERROR_CODES = {
+    "validation_error",
+    "not_found",
+    "rate_limit",
+    "cli_error",
+    "schema_unset",
+    "confirmation_required",
+    "dry_run",
+    "internal_error",
+}
+
+
+def _validate_code(code: str, allowed: set[str]) -> str:
+    if code not in allowed:
+        raise ValueError(f"Invalid result code '{code}'. Must be one of: {sorted(allowed)}")
+    return code
 
 
 def _redact_fields(task: dict[str, Any], redacted: list[str]) -> dict[str, Any]:
@@ -50,13 +67,57 @@ def _redact_list(tasks: list[dict[str, Any]], redacted: list[str]) -> list[dict[
 
 
 def _make_error(msg: str) -> dict[str, Any]:
-    return {"error": True, "message": msg}
+    return {"error": True, "message": msg, "code": _validate_code("internal_error", _ERROR_CODES)}
 
 
-def _make_success(msg: str, **extra: Any) -> dict[str, Any]:
-    result: dict[str, Any] = {"success": True, "message": msg}
+def _make_success(msg: str, code: str = "ok", **extra: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "success": True,
+        "message": msg,
+        "code": _validate_code(code, _SUCCESS_CODES),
+    }
     result.update(extra)
     return result
+
+
+def _make_coded_error(
+    msg: str,
+    code: str,
+    *,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "error": True,
+        "message": msg,
+        "code": _validate_code(code, _ERROR_CODES),
+    }
+    if details:
+        result["details"] = details
+    return result
+
+
+def _error_from_known_exception(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, RateLimitError):
+        return _make_coded_error(
+            str(exc),
+            "rate_limit",
+            details={
+                "bucket": exc.bucket,
+                "limit": exc.limit,
+                "retry_after_s": exc.window_seconds,
+            },
+        )
+    if isinstance(exc, SanitizationError):
+        return _make_coded_error(str(exc), "validation_error")
+    return _make_coded_error(str(exc), "internal_error")
+
+
+def _result_code_from_exception(exc: Exception) -> str:
+    if isinstance(exc, RateLimitError):
+        return "rate_limit"
+    if isinstance(exc, SanitizationError):
+        return "validation_error"
+    return "internal_error"
 
 
 def _timed_call(fn, *args, **kwargs):
@@ -101,8 +162,15 @@ class ToolRegistry:
         ok: bool,
         ms: float,
         err: str | None = None,
+        result_code: str | None = None,
     ) -> None:
-        self.audit.log(tool, params, result_str, ok, ms, err)
+        self.audit.log(tool, params, result_str, result_code, ok, ms, err)
+
+    def _effective_dry_run(self, dry_run: bool | None) -> bool:
+        return dry_run if dry_run is not None else self.config.dry_run_default
+
+    def _confirmation_token(self, action: str, subject: str = "") -> str:
+        return f"{action}:{subject[:8]}" if subject else action
 
     # -----------------------------------------------------------------------
     # CONTRIBUTOR tools
@@ -122,11 +190,19 @@ class ToolRegistry:
             self._log("list_tasks", params, f"{len(tasks)} tasks", True, ms)
             return _make_success(f"Found {len(tasks)} tasks.", tasks=tasks, count=len(tasks))
         except (RateLimitError, SanitizationError) as e:
-            self._log("list_tasks", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            self._log(
+                "list_tasks",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code=_result_code_from_exception(e),
+            )
+            return _error_from_known_exception(e)
         except Exception as e:
-            self._log("list_tasks", params, "", False, 0, str(e))
-            return _make_error(f"Failed to list tasks: {e}")
+            self._log("list_tasks", params, "", False, 0, str(e), result_code="internal_error")
+            return _make_coded_error(f"Failed to list tasks: {e}", "internal_error")
 
     def get_task(self, uuid: str) -> dict[str, Any]:
         """Get a single task by UUID."""
@@ -136,17 +212,25 @@ class ToolRegistry:
             clean_uuid = sanitize_uuid(uuid)
             task_data, ms = _timed_call(self.task.get_task, clean_uuid)
             if not task_data:
-                self._log("get_task", params, "not found", True, ms)
-                return _make_error(f"Task {clean_uuid} not found.")
+                self._log("get_task", params, "not found", False, ms, result_code="not_found")
+                return _make_coded_error(f"Task {clean_uuid} not found.", "not_found")
             task_data = _redact_fields(task_data, self.config.redacted_fields)
             self._log("get_task", params, "found", True, ms)
             return _make_success("Task found.", task=task_data)
         except (RateLimitError, SanitizationError) as e:
-            self._log("get_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            self._log(
+                "get_task",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code=_result_code_from_exception(e),
+            )
+            return _error_from_known_exception(e)
         except Exception as e:
-            self._log("get_task", params, "", False, 0, str(e))
-            return _make_error(f"Failed to get task: {e}")
+            self._log("get_task", params, "", False, 0, str(e), result_code="internal_error")
+            return _make_coded_error(f"Failed to get task: {e}", "internal_error")
 
     def search_tasks(self, query: str, field: str = "description") -> dict[str, Any]:
         """Search tasks by description, project, tags, or UDA values."""
@@ -171,39 +255,65 @@ class ToolRegistry:
                 count=len(tasks),
             )
         except (RateLimitError, SanitizationError) as e:
-            self._log("search_tasks", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            self._log(
+                "search_tasks",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code=_result_code_from_exception(e),
+            )
+            return _error_from_known_exception(e)
         except Exception as e:
-            self._log("search_tasks", params, "", False, 0, str(e))
-            return _make_error(f"Search failed: {e}")
+            self._log("search_tasks", params, "", False, 0, str(e), result_code="internal_error")
+            return _make_coded_error(f"Search failed: {e}", "internal_error")
 
-    def annotate_task(self, uuid: str, annotation: str) -> dict[str, Any]:
+    def annotate_task(
+        self,
+        uuid: str,
+        annotation: str,
+        dry_run: bool | None = None,
+    ) -> dict[str, Any]:
         """Add an annotation to a task."""
-        params = {"uuid": uuid, "annotation": annotation}
+        params = {"uuid": uuid, "annotation": annotation, "dry_run": dry_run}
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
             clean_annotation = sanitize_annotation(annotation)
+            if self._effective_dry_run(dry_run):
+                self._log("annotate_task", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would annotate task {clean_uuid}.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"uuid": clean_uuid, "annotation": clean_annotation},
+                )
             result, ms = _timed_call(self.task.annotate_task, clean_uuid, clean_annotation)
             if result.ok:
                 self._log("annotate_task", params, "ok", True, ms)
                 return _make_success(f"Annotation added to task {clean_uuid}.")
             self._log("annotate_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Failed to annotate task: {result.stderr}")
+            return _make_coded_error(f"Failed to annotate task: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("annotate_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("annotate_task", params, "", False, 0, str(e))
-            return _make_error(f"Annotation failed: {e}")
+            return _make_coded_error(f"Annotation failed: {e}", "internal_error")
 
-    def modify_task(self, uuid: str, fields: dict[str, str]) -> dict[str, Any]:
+    def modify_task(
+        self,
+        uuid: str,
+        fields: dict[str, str | list[str]],
+        dry_run: bool | None = None,
+    ) -> dict[str, Any]:
         """Modify fields on an existing task."""
-        params = {"uuid": uuid, "fields": fields}
+        params = {"uuid": uuid, "fields": fields, "dry_run": dry_run}
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
-            sanitized: dict[str, str] = {}
+            sanitized: dict[str, Any] = {}
             for key, value in fields.items():
                 if key == "project":
                     sanitized[key] = sanitize_project(value)
@@ -216,6 +326,14 @@ class ToolRegistry:
                     sanitized[key] = sanitize_enum(value, key, self.schema.enum_fields()[key])
                 else:
                     sanitized[key] = sanitize_field_value(value, key)
+            if self._effective_dry_run(dry_run):
+                self._log("modify_task", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would modify task {clean_uuid}.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"uuid": clean_uuid, "fields": sanitized},
+                )
             result, ms = _timed_call(self.task.modify_task, clean_uuid, **sanitized)
             if result.ok:
                 self._log("modify_task", params, "ok", True, ms)
@@ -224,51 +342,67 @@ class ToolRegistry:
                     fields_modified=list(sanitized.keys()),
                 )
             self._log("modify_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Modify failed: {result.stderr}")
+            return _make_coded_error(f"Modify failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("modify_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("modify_task", params, "", False, 0, str(e))
-            return _make_error(f"Modify failed: {e}")
+            return _make_coded_error(f"Modify failed: {e}", "internal_error")
 
-    def start_task(self, uuid: str) -> dict[str, Any]:
+    def start_task(self, uuid: str, dry_run: bool | None = None) -> dict[str, Any]:
         """Start working on a task (triggers Timewarrior via hook)."""
-        params = {"uuid": uuid}
+        params = {"uuid": uuid, "dry_run": dry_run}
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
+            if self._effective_dry_run(dry_run):
+                self._log("start_task", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would start task {clean_uuid}.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"uuid": clean_uuid},
+                )
             result, ms = _timed_call(self.task.start_task, clean_uuid)
             if result.ok:
                 self._log("start_task", params, "ok", True, ms)
                 return _make_success(f"Task {clean_uuid} started.")
             self._log("start_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Start failed: {result.stderr}")
+            return _make_coded_error(f"Start failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("start_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("start_task", params, "", False, 0, str(e))
-            return _make_error(f"Start failed: {e}")
+            return _make_coded_error(f"Start failed: {e}", "internal_error")
 
-    def stop_task(self, uuid: str) -> dict[str, Any]:
+    def stop_task(self, uuid: str, dry_run: bool | None = None) -> dict[str, Any]:
         """Stop working on a task."""
-        params = {"uuid": uuid}
+        params = {"uuid": uuid, "dry_run": dry_run}
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
+            if self._effective_dry_run(dry_run):
+                self._log("stop_task", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would stop task {clean_uuid}.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"uuid": clean_uuid},
+                )
             result, ms = _timed_call(self.task.stop_task, clean_uuid)
             if result.ok:
                 self._log("stop_task", params, "ok", True, ms)
                 return _make_success(f"Task {clean_uuid} stopped.")
             self._log("stop_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Stop failed: {result.stderr}")
+            return _make_coded_error(f"Stop failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("stop_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("stop_task", params, "", False, 0, str(e))
-            return _make_error(f"Stop failed: {e}")
+            return _make_coded_error(f"Stop failed: {e}", "internal_error")
 
     def get_projects(self) -> dict[str, Any]:
         """List all Taskwarrior projects."""
@@ -279,10 +413,10 @@ class ToolRegistry:
             return _make_success(f"Found {len(projects)} projects.", projects=projects)
         except RateLimitError as e:
             self._log("get_projects", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("get_projects", {}, "", False, 0, str(e))
-            return _make_error(f"Failed: {e}")
+            return _make_coded_error(f"Failed: {e}", "internal_error")
 
     def get_tags(self) -> dict[str, Any]:
         """List all Taskwarrior tags."""
@@ -293,10 +427,10 @@ class ToolRegistry:
             return _make_success(f"Found {len(tags)} tags.", tags=tags)
         except RateLimitError as e:
             self._log("get_tags", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("get_tags", {}, "", False, 0, str(e))
-            return _make_error(f"Failed: {e}")
+            return _make_coded_error(f"Failed: {e}", "internal_error")
 
     def get_active_context(self) -> dict[str, Any]:
         """Show the current Taskwarrior context."""
@@ -307,10 +441,10 @@ class ToolRegistry:
             return _make_success("Context retrieved.", context=ctx or "none")
         except RateLimitError as e:
             self._log("get_active_context", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("get_active_context", {}, "", False, 0, str(e))
-            return _make_error(f"Failed: {e}")
+            return _make_coded_error(f"Failed: {e}", "internal_error")
 
     def get_schema_info(self) -> dict[str, Any]:
         """Return the loaded schema definition for LLM context."""
@@ -328,7 +462,7 @@ class ToolRegistry:
         """Get Timewarrior time summary."""
         params = {"period": period}
         if not self.timew:
-            return _make_error("Timewarrior is not available.")
+            return _make_coded_error("Timewarrior is not available.", "cli_error")
         try:
             self._guard_rate()
             summary, ms = _timed_call(self.timew.summary, period)
@@ -336,15 +470,15 @@ class ToolRegistry:
             return _make_success("Timewarrior summary.", summary=summary)
         except RateLimitError as e:
             self._log("timew_summary", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("timew_summary", params, "", False, 0, str(e))
-            return _make_error(f"Failed: {e}")
+            return _make_coded_error(f"Failed: {e}", "internal_error")
 
     def timew_status(self) -> dict[str, Any]:
         """Check if Timewarrior is currently tracking."""
         if not self.timew:
-            return _make_error("Timewarrior is not available.")
+            return _make_coded_error("Timewarrior is not available.", "cli_error")
         try:
             self._guard_rate()
             status, ms = _timed_call(self.timew.status)
@@ -352,10 +486,10 @@ class ToolRegistry:
             return _make_success("Timewarrior status.", **status)
         except RateLimitError as e:
             self._log("timew_status", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("timew_status", {}, "", False, 0, str(e))
-            return _make_error(f"Failed: {e}")
+            return _make_coded_error(f"Failed: {e}", "internal_error")
 
     # -----------------------------------------------------------------------
     # GENERATOR tools
@@ -368,6 +502,7 @@ class ToolRegistry:
         priority: str = "",
         tags: list[str] | None = None,
         due: str = "",
+        dry_run: bool | None = None,
         **udas: str,
     ) -> dict[str, Any]:
         """Create a new task with schema validation."""
@@ -376,6 +511,7 @@ class ToolRegistry:
             "project": project,
             "priority": priority,
             "tags": tags,
+            "dry_run": dry_run,
             **udas,
         }
         try:
@@ -412,8 +548,12 @@ class ToolRegistry:
                     False,
                     0,
                     "; ".join(validation_errors),
+                    result_code="validation_error",
                 )
-                return _make_error(f"Schema validation failed: {'; '.join(validation_errors)}")
+                return _make_coded_error(
+                    f"Schema validation failed: {'; '.join(validation_errors)}",
+                    "validation_error",
+                )
 
             cli_fields: dict[str, str] = {}
             for key, value in task_data.items():
@@ -423,18 +563,27 @@ class ToolRegistry:
             if clean_tags:
                 cli_fields["tags"] = clean_tags
 
+            if self._effective_dry_run(dry_run):
+                self._log("create_task", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would create task '{clean_desc}'.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"description": clean_desc, "fields": cli_fields},
+                )
+
             result, ms = _timed_call(self.task.add_task, clean_desc, **cli_fields)
             if result.ok:
                 self._log("create_task", params, result.stdout, True, ms)
                 return _make_success(f"Task created. {result.stdout.strip()}")
             self._log("create_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Create failed: {result.stderr}")
+            return _make_coded_error(f"Create failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("create_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("create_task", params, "", False, 0, str(e))
-            return _make_error(f"Create failed: {e}")
+            return _make_coded_error(f"Create failed: {e}", "internal_error")
 
     def create_subtask(
         self,
@@ -444,6 +593,7 @@ class ToolRegistry:
         priority: str = "",
         tags: list[str] | None = None,
         due: str = "",
+        dry_run: bool | None = None,
         **udas: str,
     ) -> dict[str, Any]:
         """Create a subtask with depends: linking to a parent task."""
@@ -453,6 +603,7 @@ class ToolRegistry:
             "project": project,
             "priority": priority,
             "tags": tags,
+            "dry_run": dry_run,
             **udas,
         }
         try:
@@ -468,8 +619,12 @@ class ToolRegistry:
                     False,
                     0,
                     f"Parent task {clean_parent_uuid} not found",
+                    result_code="not_found",
                 )
-                return _make_error(f"Parent task {clean_parent_uuid} not found.")
+                return _make_coded_error(
+                    f"Parent task {clean_parent_uuid} not found.",
+                    "not_found",
+                )
 
             clean_desc = sanitize_description(description)
             task_data: dict[str, Any] = {
@@ -505,8 +660,12 @@ class ToolRegistry:
                     False,
                     0,
                     "; ".join(validation_errors),
+                    result_code="validation_error",
                 )
-                return _make_error(f"Schema validation failed: {'; '.join(validation_errors)}")
+                return _make_coded_error(
+                    f"Schema validation failed: {'; '.join(validation_errors)}",
+                    "validation_error",
+                )
 
             cli_fields: dict[str, str] = {}
             for key, value in task_data.items():
@@ -516,6 +675,15 @@ class ToolRegistry:
             if clean_tags:
                 cli_fields["tags"] = clean_tags
 
+            if self._effective_dry_run(dry_run):
+                self._log("create_subtask", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would create subtask under {clean_parent_uuid}.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"description": clean_desc, "fields": cli_fields},
+                )
+
             result, ms = _timed_call(self.task.add_task, clean_desc, **cli_fields)
             if result.ok:
                 self._log("create_subtask", params, result.stdout, True, ms)
@@ -523,22 +691,27 @@ class ToolRegistry:
                     f"Subtask created with parent {clean_parent_uuid}. {result.stdout.strip()}"
                 )
             self._log("create_subtask", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Create subtask failed: {result.stderr}")
+            return _make_coded_error(f"Create subtask failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("create_subtask", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("create_subtask", params, "", False, 0, str(e))
-            return _make_error(f"Create subtask failed: {e}")
+            return _make_coded_error(f"Create subtask failed: {e}", "internal_error")
 
     # -----------------------------------------------------------------------
     # MANAGER tools
     # -----------------------------------------------------------------------
 
-    def complete_task(self, uuid: str, dry_run: bool | None = None) -> dict[str, Any]:
+    def complete_task(
+        self,
+        uuid: str,
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> dict[str, Any]:
         """Mark a task as done."""
-        params = {"uuid": uuid, "dry_run": dry_run}
-        effective_dry = dry_run if dry_run is not None else self.config.dry_run_default
+        params = {"uuid": uuid, "dry_run": dry_run, "confirm_token": bool(confirm_token)}
+        effective_dry = self._effective_dry_run(dry_run)
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
@@ -546,10 +719,11 @@ class ToolRegistry:
             if effective_dry:
                 task_data = self.task.get_task(clean_uuid)
                 if not task_data:
-                    return _make_error(f"Task {clean_uuid} not found.")
-                self._log("complete_task", params, "dry_run", True, 0)
+                    return _make_coded_error(f"Task {clean_uuid} not found.", "not_found")
+                self._log("complete_task", params, "dry_run", True, 0, result_code="dry_run")
                 return _make_success(
                     f"DRY RUN: Would complete task '{task_data.get('description', '')}'.",
+                    code="dry_run",
                     dry_run=True,
                     task=_redact_fields(task_data, self.config.redacted_fields),
                 )
@@ -557,32 +731,49 @@ class ToolRegistry:
             if self.config.require_confirmation:
                 task_data = self.task.get_task(clean_uuid)
                 if not task_data:
-                    return _make_error(f"Task {clean_uuid} not found.")
-                return _make_success(
-                    "CONFIRMATION REQUIRED: Complete task "
-                    f"'{task_data.get('description', '')}'? "
-                    "Call complete_task again with dry_run=false.",
-                    needs_confirmation=True,
-                    task=_redact_fields(task_data, self.config.redacted_fields),
-                )
+                    return _make_coded_error(f"Task {clean_uuid} not found.", "not_found")
+                required_token = self._confirmation_token("complete_task", clean_uuid)
+                if confirm_token != required_token:
+                    self._log(
+                        "complete_task",
+                        params,
+                        "confirmation_required",
+                        True,
+                        0,
+                        result_code="confirmation_required",
+                    )
+                    return _make_success(
+                        "CONFIRMATION REQUIRED: Complete task "
+                        f"'{task_data.get('description', '')}'. "
+                        "Re-call complete_task with confirm_token from details.",
+                        code="confirmation_required",
+                        details={"confirmation_token": required_token},
+                        needs_confirmation=True,
+                        task=_redact_fields(task_data, self.config.redacted_fields),
+                    )
 
             result, ms = _timed_call(self.task.done_task, clean_uuid)
             if result.ok:
                 self._log("complete_task", params, "ok", True, ms)
                 return _make_success(f"Task {clean_uuid} completed.")
             self._log("complete_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Complete failed: {result.stderr}")
+            return _make_coded_error(f"Complete failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("complete_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("complete_task", params, "", False, 0, str(e))
-            return _make_error(f"Complete failed: {e}")
+            return _make_coded_error(f"Complete failed: {e}", "internal_error")
 
-    def delete_task(self, uuid: str, dry_run: bool | None = None) -> dict[str, Any]:
+    def delete_task(
+        self,
+        uuid: str,
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> dict[str, Any]:
         """Delete a task."""
-        params = {"uuid": uuid, "dry_run": dry_run}
-        effective_dry = dry_run if dry_run is not None else self.config.dry_run_default
+        params = {"uuid": uuid, "dry_run": dry_run, "confirm_token": bool(confirm_token)}
+        effective_dry = self._effective_dry_run(dry_run)
         try:
             self._guard_rate()
             clean_uuid = sanitize_uuid(uuid)
@@ -590,10 +781,11 @@ class ToolRegistry:
             if effective_dry:
                 task_data = self.task.get_task(clean_uuid)
                 if not task_data:
-                    return _make_error(f"Task {clean_uuid} not found.")
-                self._log("delete_task", params, "dry_run", True, 0)
+                    return _make_coded_error(f"Task {clean_uuid} not found.", "not_found")
+                self._log("delete_task", params, "dry_run", True, 0, result_code="dry_run")
                 return _make_success(
                     f"DRY RUN: Would delete task '{task_data.get('description', '')}'.",
+                    code="dry_run",
                     dry_run=True,
                     task=_redact_fields(task_data, self.config.redacted_fields),
                 )
@@ -601,58 +793,110 @@ class ToolRegistry:
             if self.config.require_confirmation:
                 task_data = self.task.get_task(clean_uuid)
                 if not task_data:
-                    return _make_error(f"Task {clean_uuid} not found.")
-                return _make_success(
-                    "CONFIRMATION REQUIRED: Delete task "
-                    f"'{task_data.get('description', '')}'? "
-                    "Call delete_task again with dry_run=false.",
-                    needs_confirmation=True,
-                    task=_redact_fields(task_data, self.config.redacted_fields),
-                )
+                    return _make_coded_error(f"Task {clean_uuid} not found.", "not_found")
+                required_token = self._confirmation_token("delete_task", clean_uuid)
+                if confirm_token != required_token:
+                    self._log(
+                        "delete_task",
+                        params,
+                        "confirmation_required",
+                        True,
+                        0,
+                        result_code="confirmation_required",
+                    )
+                    return _make_success(
+                        "CONFIRMATION REQUIRED: Delete task "
+                        f"'{task_data.get('description', '')}'. "
+                        "Re-call delete_task with confirm_token from details.",
+                        code="confirmation_required",
+                        details={"confirmation_token": required_token},
+                        needs_confirmation=True,
+                        task=_redact_fields(task_data, self.config.redacted_fields),
+                    )
 
             result, ms = _timed_call(self.task.delete_task, clean_uuid)
             if result.ok:
                 self._log("delete_task", params, "ok", True, ms)
                 return _make_success(f"Task {clean_uuid} deleted.")
             self._log("delete_task", params, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Delete failed: {result.stderr}")
+            return _make_coded_error(f"Delete failed: {result.stderr}", "cli_error")
         except (RateLimitError, SanitizationError) as e:
             self._log("delete_task", params, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("delete_task", params, "", False, 0, str(e))
-            return _make_error(f"Delete failed: {e}")
+            return _make_coded_error(f"Delete failed: {e}", "internal_error")
 
-    def undo(self) -> dict[str, Any]:
+    def undo(
+        self,
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> dict[str, Any]:
         """Undo the last Taskwarrior operation."""
+        params = {"dry_run": dry_run, "confirm_token": bool(confirm_token)}
         try:
             self._guard_rate()
+            if self._effective_dry_run(dry_run):
+                self._log("undo", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    "DRY RUN: Would undo the last Taskwarrior operation.",
+                    code="dry_run",
+                    dry_run=True,
+                )
+
+            if self.config.require_confirmation:
+                required_token = self._confirmation_token("undo")
+                if confirm_token != required_token:
+                    self._log(
+                        "undo",
+                        params,
+                        "confirmation_required",
+                        True,
+                        0,
+                        result_code="confirmation_required",
+                    )
+                    return _make_success(
+                        "CONFIRMATION REQUIRED: Undo the last operation. "
+                        "Re-call undo with confirm_token from details.",
+                        code="confirmation_required",
+                        details={"confirmation_token": required_token},
+                        needs_confirmation=True,
+                    )
+
             result, ms = _timed_call(self.task.undo)
             if result.ok:
                 self._log("undo", {}, "ok", True, ms)
                 return _make_success("Undo successful.")
             self._log("undo", {}, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Undo failed: {result.stderr}")
+            return _make_coded_error(f"Undo failed: {result.stderr}", "cli_error")
         except RateLimitError as e:
             self._log("undo", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("undo", {}, "", False, 0, str(e))
-            return _make_error(f"Undo failed: {e}")
+            return _make_coded_error(f"Undo failed: {e}", "internal_error")
 
-    def sync(self) -> dict[str, Any]:
+    def sync(self, dry_run: bool | None = None) -> dict[str, Any]:
         """Trigger task sync with TaskChampion server."""
+        params = {"dry_run": dry_run}
         try:
             self._guard_rate()
+            if self._effective_dry_run(dry_run):
+                self._log("sync", params, "dry_run", True, 0, result_code="dry_run")
+                return _make_success(
+                    "DRY RUN: Would run task sync against the configured server.",
+                    code="dry_run",
+                    dry_run=True,
+                )
             result, ms = _timed_call(self.task.sync)
             if result.ok:
                 self._log("sync", {}, "ok", True, ms)
                 return _make_success(f"Sync complete. {result.stdout.strip()}")
             self._log("sync", {}, result.stderr, False, ms, result.stderr)
-            return _make_error(f"Sync failed: {result.stderr}")
+            return _make_coded_error(f"Sync failed: {result.stderr}", "cli_error")
         except RateLimitError as e:
             self._log("sync", {}, "", False, 0, str(e))
-            return _make_error(str(e))
+            return _error_from_known_exception(e)
         except Exception as e:
             self._log("sync", {}, "", False, 0, str(e))
-            return _make_error(f"Sync failed: {e}")
+            return _make_coded_error(f"Sync failed: {e}", "internal_error")

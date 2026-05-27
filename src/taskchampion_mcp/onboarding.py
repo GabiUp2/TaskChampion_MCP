@@ -26,8 +26,9 @@ Design constraints:
 
 Onboarding flow (user-facing summary):
 
-1. :func:`get_initialisation_status` — read-only status.
-2. :func:`propose_initialisation_options` — present choices to the user.
+1. :func:`get_initialisation_status` — read-only status (exposed as `get_initialization_status`).
+2. :func:`propose_initialisation_options` — present choices to the user
+   (exposed as `propose_initialization_options`).
 3. Branch on the chosen option:
    - ``use_taxonomy`` / ``infer_from_tasks`` / ``hybrid_taxonomy_plus_tasks``:
      call :func:`generate_schema_preview`, review the TOML, then call
@@ -359,7 +360,7 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "recommended": has_taxonomy,
                 "requires_user_input": not has_taxonomy,
                 "next_tools": [
-                    "analyse_taxonomy_file",
+                    "analyze_taxonomy_file",
                     "generate_initial_schema_preview",
                     "save_initial_schema",
                 ],
@@ -374,7 +375,7 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "recommended": not has_taxonomy and task_count > 0,
                 "requires_user_input": False,
                 "next_tools": [
-                    "analyse_existing_tasks_for_schema",
+                    "analyze_existing_tasks_for_schema",
                     "generate_initial_schema_preview",
                     "save_initial_schema",
                 ],
@@ -390,8 +391,8 @@ def propose_initialisation_options(status: dict[str, Any]) -> dict[str, Any]:
                 "recommended": has_taxonomy and task_count > 0,
                 "requires_user_input": False,
                 "next_tools": [
-                    "analyse_taxonomy_file",
-                    "analyse_existing_tasks_for_schema",
+                    "analyze_taxonomy_file",
+                    "analyze_existing_tasks_for_schema",
                     "generate_initial_schema_preview",
                     "save_initial_schema",
                 ],

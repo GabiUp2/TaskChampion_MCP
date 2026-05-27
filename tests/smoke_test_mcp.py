@@ -29,14 +29,14 @@ from pathlib import Path
 
 # Onboarding tools — always registered on a fresh / uninitialised install
 EXPECTED_ONBOARDING_TOOLS = {
-    "get_initialisation_status",
-    "propose_initialisation_options",
+    "get_initialization_status",
+    "propose_initialization_options",
     "list_preset_schemas",
     "use_preset_schema",
     "save_initial_schema",
     "generate_initial_schema_preview",
-    "analyse_existing_tasks_for_schema",
-    "analyse_taxonomy_file",
+    "analyze_existing_tasks_for_schema",
+    "analyze_taxonomy_file",
 }
 
 # Contributor tools — registered after onboarding (or always, per stable-surface ADR)

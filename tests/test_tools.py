@@ -165,3 +165,55 @@ class TestCreateSubtask:
 
         assert result["error"] is True
         assert "Create subtask failed" in result["message"]
+
+
+class TestErrorModel:
+    def test_success_envelope_has_code_ok(self, tool_registry, mock_task_cli):
+        mock_task_cli.export_tasks.return_value = []
+        result = tool_registry.list_tasks()
+        assert result["success"] is True
+        assert result["code"] == "ok"
+
+    def test_not_found_uses_not_found_code(self, tool_registry, mock_task_cli):
+        mock_task_cli.get_task.return_value = None
+        result = tool_registry.get_task("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+        assert result["error"] is True
+        assert result["code"] == "not_found"
+
+    def test_rate_limit_uses_retryable_code(self, tool_registry, mock_rate_limiter):
+        from taskchampion_mcp.rate_limiter import RateLimitError
+
+        mock_rate_limiter.check_and_record.side_effect = RateLimitError("ops_per_minute", 30, 60)
+        result = tool_registry.list_tasks()
+        assert result["error"] is True
+        assert result["code"] == "rate_limit"
+        assert result["details"]["retry_after_s"] == 60
+
+    def test_modify_task_dry_run_skips_cli_mutation(self, tool_registry, mock_task_cli):
+        result = tool_registry.modify_task(
+            uuid="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            fields={"priority": "H"},
+            dry_run=True,
+        )
+        assert result["success"] is True
+        assert result["code"] == "dry_run"
+        mock_task_cli.modify_task.assert_not_called()
+
+    def test_complete_task_confirmation_has_code(self, tool_registry, mock_task_cli, mock_config):
+        mock_config.require_confirmation = True
+        mock_task_cli.get_task.return_value = {
+            "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "description": "Example",
+        }
+        result = tool_registry.complete_task(
+            uuid="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            dry_run=False,
+        )
+        assert result["success"] is True
+        assert result["code"] == "confirmation_required"
+
+    def test_undo_supports_dry_run(self, tool_registry, mock_task_cli):
+        result = tool_registry.undo(dry_run=True)
+        assert result["success"] is True
+        assert result["code"] == "dry_run"
+        mock_task_cli.undo.assert_not_called()

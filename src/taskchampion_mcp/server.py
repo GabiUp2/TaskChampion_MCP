@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -22,15 +25,35 @@ from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
 from taskchampion_mcp.config import Role, ServerConfig, load_config
 from taskchampion_mcp.onboarding import (
     analyse_existing_tasks as onboarding_analyse_existing_tasks,
-    analyse_taxonomy_file as onboarding_analyse_taxonomy_file,
+)
+from taskchampion_mcp.onboarding import (
+    analyse_taxonomy_file as onboarding_analyze_taxonomy_file,
+)
+from taskchampion_mcp.onboarding import (
     generate_schema_preview as onboarding_generate_schema_preview,
-    get_initialisation_status as onboarding_get_initialisation_status,
+)
+from taskchampion_mcp.onboarding import (
+    get_initialisation_status as onboarding_get_initialization_status,
+)
+from taskchampion_mcp.onboarding import (
     list_preset_schemas as onboarding_list_preset_schemas,
-    propose_initialisation_options as onboarding_propose_initialisation_options,
+)
+from taskchampion_mcp.onboarding import (
+    propose_initialisation_options as onboarding_propose_initialization_options,
+)
+from taskchampion_mcp.onboarding import (
     reconfigure_active_schema as onboarding_reconfigure_active_schema,
+)
+from taskchampion_mcp.onboarding import (
     reconfigure_role as onboarding_reconfigure_role,
+)
+from taskchampion_mcp.onboarding import (
     reconfigure_taxonomy_path as onboarding_reconfigure_taxonomy_path,
+)
+from taskchampion_mcp.onboarding import (
     save_initial_schema as onboarding_save_initial_schema,
+)
+from taskchampion_mcp.onboarding import (
     use_preset_schema as onboarding_use_preset_schema,
 )
 from taskchampion_mcp.rate_limiter import RateLimiter
@@ -38,6 +61,49 @@ from taskchampion_mcp.schema import TaskSchema, load_schema
 from taskchampion_mcp.tools import ToolRegistry
 
 logger = logging.getLogger("taskchampion_mcp")
+
+
+class _JsonLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "logger": record.name,
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str)
+
+
+def _resolve_log_level(level_name: str) -> tuple[int, bool]:
+    requested = (level_name or "INFO").upper()
+    if requested in logging._nameToLevel and logging._nameToLevel[requested]:
+        return logging._nameToLevel[requested], False
+    return logging.INFO, True
+
+
+def _configure_logging(stream: Any | None = None) -> None:
+    stderr_stream = stream if stream is not None else sys.stderr
+    level_name = os.environ.get("TC_MCP_LOG_LEVEL", "INFO")
+    level, invalid_level = _resolve_log_level(level_name)
+
+    is_tty = bool(getattr(stderr_stream, "isatty", lambda: False)())
+    formatter: logging.Formatter
+    if is_tty:
+        formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    else:
+        formatter = _JsonLineFormatter()
+
+    logging.basicConfig(level=level, stream=stderr_stream, format="%(message)s", force=True)
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
+
+    if invalid_level:
+        logger.warning(
+            "Invalid TC_MCP_LOG_LEVEL '%s'; falling back to INFO.",
+            level_name,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +174,10 @@ def create_server(
         creates_per_hour=config.create_limit_per_hour,
     )
 
-    audit = AuditLogger(config.audit_log_path)
+    audit = AuditLogger(
+        config.audit_log_path,
+        redacted_fields=config.redacted_fields,
+    )
     audit.log_startup(config.role, schema.name, tw_version)
 
     registry = ToolRegistry(
@@ -163,14 +232,14 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     """Register first-run onboarding tools."""
 
     @mcp.tool()
-    def get_initialisation_status(project_dir: str = "") -> str:
+    def get_initialization_status(project_dir: str = "") -> str:
         """Inspect first-run onboarding state without mutating tasks or config.
 
         Use this before task creation/modification if the active schema may be
         the bundled minimal default rather than a user-specific taxonomy.
         """
         return json.dumps(
-            onboarding_get_initialisation_status(
+            onboarding_get_initialization_status(
                 config=reg.config,
                 task_cli=reg.task,
                 timew_cli=reg.timew,
@@ -179,22 +248,22 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         )
 
     @mcp.tool()
-    def propose_initialisation_options(project_dir: str = "") -> str:
+    def propose_initialization_options(project_dir: str = "") -> str:
         """Return onboarding choices for the user/model to discuss.
 
         Options include using a taxonomy file, inferring from existing tasks,
         combining both, or selecting a bundled preset.
         """
-        status = onboarding_get_initialisation_status(
+        status = onboarding_get_initialization_status(
             config=reg.config,
             task_cli=reg.task,
             timew_cli=reg.timew,
             project_dir=project_dir or None,
         )
-        return json.dumps(onboarding_propose_initialisation_options(status))
+        return json.dumps(onboarding_propose_initialization_options(status))
 
     @mcp.tool()
-    def analyse_existing_tasks_for_schema() -> str:
+    def analyze_existing_tasks_for_schema() -> str:
         """Analyse existing Taskwarrior tasks for field/schema inference.
 
         This is read-only. It returns field occurrence ratios, likely enum
@@ -203,13 +272,13 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         return json.dumps(onboarding_analyse_existing_tasks(reg.task))
 
     @mcp.tool()
-    def analyse_taxonomy_file(path: str) -> str:
+    def analyze_taxonomy_file(path: str) -> str:
         """Parse a taxonomy Markdown file and return extracted semantics.
 
         This is read-only. It extracts fields, descriptions, allowed values,
         conditional requirements, and phase transitions when possible.
         """
-        return json.dumps(onboarding_analyse_taxonomy_file(path))
+        return json.dumps(onboarding_analyze_taxonomy_file(path))
 
     @mcp.tool()
     def generate_initial_schema_preview(
@@ -249,7 +318,7 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         before saving.
 
         ``role`` is the MCP permission level to persist in config.toml. Pass
-        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialisation_options
+        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialization_options
         for descriptions). When omitted, CONTRIBUTOR is persisted so the server
         leaves onboarding mode on next restart. Without persisting a role the
         server stays stuck on the onboarding tool surface.
@@ -298,7 +367,7 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         overwrite=true.
 
         ``role`` is the MCP permission level to persist in config.toml. Pass
-        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialisation_options
+        one of CONTRIBUTOR / GENERATOR / MANAGER (see propose_initialization_options
         for descriptions). When omitted, CONTRIBUTOR is persisted so the server
         leaves onboarding mode on next restart. Without persisting a role the
         server stays stuck on the onboarding tool surface.
@@ -358,45 +427,48 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         return json.dumps(reg.search_tasks(query, field))
 
     @mcp.tool()
-    def annotate_task(uuid: str, annotation: str) -> str:
+    def annotate_task(uuid: str, annotation: str, dry_run: bool | None = None) -> str:
         """Add an annotation (note, link, or context) to a task.
 
         Annotations are the preferred way to add narrative context,
         rationale, and reference links to tasks.
         """
-        return json.dumps(reg.annotate_task(uuid, annotation))
+        return json.dumps(reg.annotate_task(uuid, annotation, dry_run))
 
     @mcp.tool()
-    def modify_task(uuid: str, fields: str) -> str:
+    def modify_task(
+        uuid: str,
+        fields: dict[str, str | list[str]],
+        dry_run: bool | None = None,
+    ) -> str:
         """Modify fields on an existing task.
 
         Args:
             uuid: Task UUID.
-            fields: JSON object of field:value pairs to modify.
-                    Example: '{"priority": "H", "phase": "impl"}'
-                    For adding tags: '{"tags_add": ["python"]}'
-                    For removing tags: '{"tags_remove": ["old"]}'
+            fields: Field:value pairs to modify.
+                    Example: {"priority": "H", "phase": "impl"}
+                    For adding tags: {"tags_add": ["python"]}
+                    For removing tags: {"tags_remove": ["old"]}
         """
-        parsed = json.loads(fields)
-        return json.dumps(reg.modify_task(uuid, parsed))
+        return json.dumps(reg.modify_task(uuid, fields, dry_run))
 
     @mcp.tool()
-    def start_task(uuid: str) -> str:
+    def start_task(uuid: str, dry_run: bool | None = None) -> str:
         """Start working on a task.
 
         If Timewarrior hook is installed, this also starts
         time tracking with the task's tags.
         """
-        return json.dumps(reg.start_task(uuid))
+        return json.dumps(reg.start_task(uuid, dry_run))
 
     @mcp.tool()
-    def stop_task(uuid: str) -> str:
+    def stop_task(uuid: str, dry_run: bool | None = None) -> str:
         """Stop working on a task.
 
         If Timewarrior hook is installed, this also stops
         time tracking for the task.
         """
-        return json.dumps(reg.stop_task(uuid))
+        return json.dumps(reg.stop_task(uuid, dry_run))
 
     @mcp.tool()
     def get_projects() -> str:
@@ -426,7 +498,7 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     if reg.timew:
 
         @mcp.tool()
-        def timew_summary(period: str = ":day") -> str:
+        def get_time_summary(period: str = ":day") -> str:
             """Get Timewarrior time tracking summary.
 
             Args:
@@ -436,7 +508,7 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             return json.dumps(reg.timew_summary(period))
 
         @mcp.tool()
-        def timew_status() -> str:
+        def get_time_status() -> str:
             """Check if Timewarrior is currently tracking time."""
             return json.dumps(reg.timew_status())
 
@@ -466,6 +538,7 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             tool_name=tool_name,
             parameters=params,
             result=json.dumps(summary, default=str),
+            result_code=result.get("code"),
             success=ok,
             error=None if ok else (result.get("message") or "unknown error"),
         )
@@ -550,9 +623,10 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         description: str,
         project: str = "",
         priority: str = "",
-        tags: str = "",
+        tags: list[str] | None = None,
         due: str = "",
-        extra_fields: str = "",
+        extra_fields: dict[str, str] | None = None,
+        dry_run: bool | None = None,
     ) -> str:
         """Create a new Taskwarrior task with schema validation.
 
@@ -560,17 +634,15 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             description: Task description (imperative, actionable).
             project: Project name in dot-notation (e.g. 'work.acme').
             priority: H, M, or L.
-            tags: Comma-separated tags (e.g. 'python,docker').
+            tags: List of tags (e.g. ["python", "docker"]).
             due: Due date (ISO format or Taskwarrior relative like 'eow').
-            extra_fields: JSON object of additional UDA fields.
-                Example: '{"scope": "personal", "phase": "impl"}'
+            extra_fields: Additional UDA fields.
+                Example: {"scope": "personal", "phase": "impl"}
 
         Call get_schema_info first to see required and available fields.
         """
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-        udas: dict[str, str] = {}
-        if extra_fields:
-            udas = json.loads(extra_fields)
+        tag_list = [t.strip() for t in tags if t and t.strip()] if tags else None
+        udas: dict[str, str] = dict(extra_fields or {})
         return json.dumps(
             reg.create_task(
                 description=description,
@@ -578,6 +650,7 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 priority=priority,
                 tags=tag_list,
                 due=due,
+                dry_run=dry_run,
                 **udas,
             )
         )
@@ -591,6 +664,7 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         tags: str = "",
         due: str = "",
         extra_fields: str = "",
+        dry_run: bool | None = None,
     ) -> str:
         """Create a subtask with depends: linking to a parent task.
 
@@ -619,6 +693,7 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 priority=priority,
                 tags=tag_list,
                 due=due,
+                dry_run=dry_run,
                 **udas,
             )
         )
@@ -628,7 +703,11 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     """Register MANAGER-level tools (lifecycle control)."""
 
     @mcp.tool()
-    def complete_task(uuid: str, dry_run: bool = False) -> str:
+    def complete_task(
+        uuid: str,
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> str:
         """Mark a task as done (completed).
 
         Args:
@@ -638,10 +717,14 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Destructive operation — may require confirmation depending
         on server configuration.
         """
-        return json.dumps(reg.complete_task(uuid, dry_run))
+        return json.dumps(reg.complete_task(uuid, dry_run, confirm_token))
 
     @mcp.tool()
-    def delete_task(uuid: str, dry_run: bool = False) -> str:
+    def delete_task(
+        uuid: str,
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> str:
         """Delete a task from Taskwarrior.
 
         Args:
@@ -651,23 +734,23 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Destructive operation — may require confirmation depending
         on server configuration. Prefer completing over deleting.
         """
-        return json.dumps(reg.delete_task(uuid, dry_run))
+        return json.dumps(reg.delete_task(uuid, dry_run, confirm_token))
 
     @mcp.tool()
-    def undo() -> str:
+    def undo_last_action(dry_run: bool | None = None, confirm_token: str = "") -> str:
         """Undo the last Taskwarrior operation.
 
         Reverts the most recent change. Use with caution.
         """
-        return json.dumps(reg.undo())
+        return json.dumps(reg.undo(dry_run=dry_run, confirm_token=confirm_token))
 
     @mcp.tool()
-    def sync() -> str:
+    def sync_tasks(dry_run: bool | None = None) -> str:
         """Trigger task sync with the TaskChampion sync server.
 
         Pushes local changes and pulls remote changes.
         """
-        return json.dumps(reg.sync())
+        return json.dumps(reg.sync(dry_run=dry_run))
 
 
 # ---------------------------------------------------------------------------
@@ -686,7 +769,10 @@ def _build_instructions(
     if onboarding_required:
         return "\n".join(
             [
-                "You are interacting with a Taskwarrior 3.x task database via the TaskChampion MCP server.",
+                (
+                    "You are interacting with a Taskwarrior 3.x task database via the "
+                    "TaskChampion MCP server."
+                ),
                 "",
                 "This MCP installation is visible, but it is not initialised yet.",
                 "",
@@ -695,28 +781,47 @@ def _build_instructions(
                 f"- fallback schema: {schema.name} (v{schema.version})",
                 f"- Taskwarrior version: {tw_version or 'unknown'}",
                 "",
-                "Do not present the fallback role or fallback schema as user-selected configuration.",
+                (
+                    "Do not present the fallback role or fallback schema as "
+                    "user-selected configuration."
+                ),
                 "Do not claim normal task-management capabilities yet.",
-                "Do not read, modify, annotate, create, complete, delete, undo, or sync tasks until onboarding is complete.",
+                (
+                    "Do not read, modify, annotate, create, complete, delete, "
+                    "undo, or sync tasks until onboarding is complete."
+                ),
                 "",
                 "Your first task is to help the user initialise the MCP configuration.",
                 "",
                 "Initialisation decisions to guide:",
                 "1. MCP role scope: CONTRIBUTOR, GENERATOR, or MANAGER.",
-                "2. Schema source: generated from taxonomy, inferred from existing tasks, hybrid, or bundled preset.",
+                (
+                    "2. Schema source: generated from taxonomy, inferred from "
+                    "existing tasks, hybrid, or bundled preset."
+                ),
                 "3. Optional taxonomy path / workflow taxonomy.",
                 "",
                 "Available onboarding flow:",
-                "- call get_initialisation_status first",
-                "- then call propose_initialisation_options",
-                "- for taxonomy or task inference: generate_initial_schema_preview, show the user a summary, then save_initial_schema only after approval",
-                "- for preset selection: list_preset_schemas, let the user choose, then use_preset_schema",
+                "- call get_initialization_status first",
+                "- then call propose_initialization_options",
+                (
+                    "- for taxonomy or task inference: "
+                    "generate_initial_schema_preview, show the user a summary, "
+                    "then save_initial_schema only after approval"
+                ),
+                (
+                    "- for preset selection: list_preset_schemas, "
+                    "let the user choose, then use_preset_schema"
+                ),
                 "",
                 "Never silently invent workflow semantics.",
                 "Never save a schema the user has not approved.",
                 "",
                 "MANDATORY UNINITIALISED RESPONSE RULE:",
-                "If onboarding_required is true, every user-facing answer about this server's availability MUST include:",
+                (
+                    "If onboarding_required is true, every user-facing answer "
+                    "about this server's availability MUST include:"
+                ),
                 "1. that the server is visible but not initialised;",
                 "2. that fallback role/schema are not user-selected;",
                 "3. a concrete onboarding menu with role and schema-source choices;",
@@ -735,25 +840,26 @@ def _build_instructions(
 
     if config.role == Role.CONTRIBUTOR:
         lines.append(
-            "You can READ, ANNOTATE, and MODIFY existing tasks. "
+            "You can READ, ANNOTATE, MODIFY, START, and STOP existing tasks. "
             "You CANNOT create new tasks or complete/delete them."
         )
     elif config.role == Role.GENERATOR:
         lines.append(
-            "You can READ, ANNOTATE, MODIFY, and CREATE tasks. You CANNOT complete or delete tasks."
+            "You can READ, ANNOTATE, MODIFY, START, STOP, and CREATE tasks. "
+            "You CANNOT complete or delete tasks."
         )
     elif config.role == Role.MANAGER:
         lines.append(
             "You have FULL ACCESS: read, annotate, modify, create, "
-            "complete, delete, undo, and sync."
+            "complete, delete, undo_last_action, and sync_tasks."
         )
 
     lines += [
         "",
         "FIRST-RUN / TAXONOMY RULES:",
-        "- If task semantics are unclear, call get_initialisation_status first.",
+        "- If task semantics are unclear, call get_initialization_status first.",
         (
-            "- If onboarding is needed, call propose_initialisation_options "
+            "- If onboarding is needed, call propose_initialization_options "
             "and present the choices to the user."
         ),
         (
@@ -786,11 +892,7 @@ def _build_instructions(
 
 def main() -> None:
     """CLI entry point for taskchampion-mcp-server."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        stream=sys.stderr,
-    )
+    _configure_logging()
     mcp = create_server()
     mcp.run(transport="stdio")
 

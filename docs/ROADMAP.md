@@ -19,10 +19,10 @@ This is the current release. It established the security baseline (ADR 9), the r
 ### Core MCP tools
 
 **CONTRIBUTOR** (read + annotate + modify):
-- [x] `get_initialisation_status` — inspect schema/taxonomy readiness before task mutations
-- [x] `propose_initialisation_options` — first-run choices: taxonomy, inference, hybrid, or preset
-- [x] `analyse_existing_tasks_for_schema` — read-only field/value analysis from `task export`
-- [x] `analyse_taxonomy_file` — parse taxonomy Markdown for field semantics
+- [x] `get_initialization_status` — inspect schema/taxonomy readiness before task mutations
+- [x] `propose_initialization_options` — first-run choices: taxonomy, inference, hybrid, or preset
+- [x] `analyze_existing_tasks_for_schema` — read-only field/value analysis from `task export`
+- [x] `analyze_taxonomy_file` — parse taxonomy Markdown for field semantics
 - [x] `generate_initial_schema_preview` — reviewable schema TOML without writes
 - [x] `save_initial_schema` — persist approved schema, optionally update `config.toml`
 - [x] `list_preset_schemas` / `use_preset_schema`
@@ -30,7 +30,7 @@ This is the current release. It established the security baseline (ADR 9), the r
 - [x] `annotate_task` / `modify_task`
 - [x] `start_task` / `stop_task`
 - [x] `get_projects` / `get_tags` / `get_active_context` / `get_schema_info`
-- [x] `timew_summary` / `timew_status` (registered only if Timewarrior present)
+- [x] `get_time_summary` / `get_time_status` (registered only if Timewarrior present)
 
 **GENERATOR** (+ create):
 - [x] `create_task`
@@ -38,7 +38,7 @@ This is the current release. It established the security baseline (ADR 9), the r
 **MANAGER** (+ lifecycle):
 - [x] `complete_task` (dry-run + confirmation)
 - [x] `delete_task` (dry-run + confirmation)
-- [x] `undo` / `sync`
+- [x] `undo_last_action` / `sync_tasks`
 
 ### Foundation
 
@@ -61,26 +61,26 @@ This is the current release. It established the security baseline (ADR 9), the r
 
 Resolves design-system audit findings (see commit history / changelog for full list).
 
-- [ ] Standardize on American spelling: `analyze_*`, `initialization`, `propose_initialization_options`
-- [ ] Drop JSON-string params: `modify_task.fields` → `dict`, `create_task.extra_fields` → `dict`, `create_task.tags` → `list[str]`
-- [ ] Lifecycle verb parallelism: `undo` → `undo_last_action`, `sync` → `sync_tasks`
-- [ ] Choose namespacing convention (recommend dropping `timew_` prefix; differentiate by docstring)
-- [ ] Rewrite `_build_instructions` role descriptions to acknowledge CONTRIBUTOR write surface (modify/annotate/start/stop)
+- [x] Standardize on American spelling: `analyze_*`, `initialization`, `propose_initialization_options`
+- [x] Drop JSON-string params: `modify_task.fields` → `dict`, `create_task.extra_fields` → `dict`, `create_task.tags` → `list[str]`
+- [x] Lifecycle verb parallelism: `undo` → `undo_last_action`, `sync` → `sync_tasks`
+- [x] Choose namespacing convention (dropped `timew_` prefix; use `get_time_*` names)
+- [x] Rewrite `_build_instructions` role descriptions to acknowledge CONTRIBUTOR write surface (modify/annotate/start/stop)
 
 ### Error model (ADR 14)
 
-- [ ] Add `code` field to every success and error envelope
-- [ ] Implement closed-set error categories: `validation_error`, `not_found`, `rate_limit`, `cli_error`, `schema_unset`, `confirmation_required`, `dry_run`, `internal_error`
-- [ ] Add `dry_run: bool` to every destructive tool (currently only on `complete_task`, `delete_task`)
-- [ ] Restrict `require_confirmation` to MANAGER lifecycle tools per ADR 14
+- [x] Add `code` field to every success and error envelope
+- [x] Implement closed-set error categories: `validation_error`, `not_found`, `rate_limit`, `cli_error`, `schema_unset`, `confirmation_required`, `dry_run`, `internal_error`
+- [x] Add `dry_run: bool` to every destructive tool (currently only on `complete_task`, `delete_task`)
+- [x] Restrict `require_confirmation` to MANAGER lifecycle tools per ADR 14
 
 ### Observability (ADR 13)
 
-- [ ] Add `result_code` to audit log entries
-- [ ] JSON Lines vs human stderr based on TTY detection
-- [ ] `TC_MCP_LOG_LEVEL` env var
-- [ ] Document `logrotate` snippet in `docs/manuals/`
-- [ ] Redact `config.redacted_fields` from audit log parameter dict
+- [x] Add `result_code` to audit log entries
+- [x] JSON Lines vs human stderr based on TTY detection
+- [x] `TC_MCP_LOG_LEVEL` env var
+- [x] Document `logrotate` snippet in `docs/manuals/`
+- [x] Redact `config.redacted_fields` from audit log parameter dict
 
 ### Config precedence (ADR 16)
 
@@ -157,7 +157,7 @@ Each target must support the same feature set ("symmetric UX"). Cells marked `�
 | All GENERATOR tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | All MANAGER tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Schema preset loading | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Onboarding flow (`get_initialisation_status` → `save_initial_schema`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Onboarding flow (`get_initialization_status` → `save_initial_schema`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Timewarrior tools (if installed) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Rate limiting | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Audit log written | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -174,9 +174,9 @@ Each target must support the same feature set ("symmetric UX"). Cells marked `�
 Each target's `tests/targets/<target>/` runs the same script and reports per-feature pass/fail. The acceptance suite — identical across targets — is:
 
 1. Server starts, advertises the expected role's tool set
-2. `get_initialisation_status` returns valid JSON
+2. `get_initialization_status` returns valid JSON
 3. `list_preset_schemas` returns at least the five bundled presets
-4. Onboarding round-trip: `analyse_existing_tasks_for_schema` → `generate_initial_schema_preview` → `save_initial_schema` (using a temp output path)
+4. Onboarding round-trip: `analyze_existing_tasks_for_schema` → `generate_initial_schema_preview` → `save_initial_schema` (using a temp output path)
 5. `list_tasks` with empty and non-empty filters
 6. `get_task` for a known UUID
 7. `search_tasks` across `description`, `project`, `tags`, UDA
@@ -187,8 +187,8 @@ Each target's `tests/targets/<target>/` runs the same script and reports per-fea
 12. GENERATOR-only: `create_task` minimal; `create_task` with full UDA payload
 13. MANAGER-only: `complete_task` with `dry_run=true` (expect `code: "dry_run"`)
 14. MANAGER-only: `delete_task` with `dry_run=true` (expect `code: "dry_run"`)
-15. MANAGER-only: `undo` after a real modification
-16. MANAGER-only: `sync` against a configured TaskChampion sync server (skipped if unconfigured)
+15. MANAGER-only: `undo_last_action` after a real modification
+16. MANAGER-only: `sync_tasks` against a configured TaskChampion sync server (skipped if unconfigured)
 17. Rate limiter triggers at configured threshold; returns `code: "rate_limit"`
 18. Audit log entry written for every call above; entries parseable as JSON Lines with stable schema (ADR 13)
 19. Confirmation flow on a MANAGER lifecycle tool: first call → `code: "confirmation_required"`, second call → success

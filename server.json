@@ -70,19 +70,19 @@
       "description": "Delete a task by UUID"
     },
     {
-      "name": "undo",
+      "name": "undo_last_action",
       "description": "Undo the last Taskwarrior operation"
     },
     {
-      "name": "sync",
+      "name": "sync_tasks",
       "description": "Trigger task sync via TaskChampion"
     },
     {
-      "name": "timew_status",
+      "name": "get_time_status",
       "description": "Check if Timewarrior is currently tracking time"
     },
     {
-      "name": "timew_summary",
+      "name": "get_time_summary",
       "description": "Get Timewarrior time tracking summary"
     },
     {
