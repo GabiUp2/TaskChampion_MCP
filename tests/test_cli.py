@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
 
 import pytest
 
@@ -52,7 +51,9 @@ def test_run_timeout_raises_cli_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_taskwarrior_version_handles_missing_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     cli = TaskwarriorCLI(binary="task")
-    monkeypatch.setattr("taskchampion_mcp.cli._run", lambda *_a, **_k: (_ for _ in ()).throw(ToolNotFoundError("x")))
+    monkeypatch.setattr(
+        "taskchampion_mcp.cli._run", lambda *_a, **_k: (_ for _ in ()).throw(ToolNotFoundError("x"))
+    )
     assert cli.version() is None
 
 
@@ -67,7 +68,7 @@ def test_taskwarrior_export_failure_raises(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_taskwarrior_add_task_and_get_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    cli = TaskwarriorCLI(binary="task", override_rc="/tmp/taskrc")
+    cli = TaskwarriorCLI(binary="task", override_rc="taskrc.test")
     outputs = [
         CLIResult(returncode=0, stdout="", stderr=""),  # add_task
         CLIResult(returncode=0, stdout='[{"uuid":"u"}]', stderr=""),  # get_task/export
@@ -113,7 +114,9 @@ def test_taskwarrior_lifecycle_commands(monkeypatch: pytest.MonkeyPatch) -> None
     assert cli.sync().ok is True
 
 
-def test_taskwarrior_count_projects_tags_context_and_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_taskwarrior_count_projects_tags_context_and_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cli = TaskwarriorCLI(binary="task")
     outputs = [
         CLIResult(returncode=0, stdout="7\n", stderr=""),
@@ -180,6 +183,8 @@ def test_timewarrior_methods(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_timewarrior_missing_binary_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     cli = TimewarriorCLI(binary="timew")
-    monkeypatch.setattr("taskchampion_mcp.cli._run", lambda *_a, **_k: (_ for _ in ()).throw(ToolNotFoundError("x")))
+    monkeypatch.setattr(
+        "taskchampion_mcp.cli._run", lambda *_a, **_k: (_ for _ in ()).throw(ToolNotFoundError("x"))
+    )
     assert cli.available() is False
     assert cli.version() is None

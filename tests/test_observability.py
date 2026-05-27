@@ -136,9 +136,9 @@ def test_audit_call_logs_successful_onboarding_result(tmp_path: Path) -> None:
         return {
             "success": True,
             "code": "ok",
-            "schema_path": "/tmp/generated_schema.toml",
+            "schema_path": "generated_schema.toml",
             "role": "CONTRIBUTOR",
-            "config_file": "/tmp/config.toml",
+            "config_file": "config.toml",
             "restart_required": True,
             "message": "Initial schema saved.",
             # Large field that MUST NOT land in the audit summary:
@@ -231,10 +231,10 @@ def test_audit_call_curates_only_known_summary_keys(tmp_path: Path) -> None:
         return {
             "success": True,
             "code": "ok",
-            "schema_name": "minimal",          # in allow-list
-            "task_count": 7,                   # in allow-list
-            "secret_internal_field": "shhh",   # NOT in allow-list
-            "internal_debug_state": [1, 2, 3], # NOT in allow-list
+            "schema_name": "minimal",  # in allow-list
+            "task_count": 7,  # in allow-list
+            "secret_internal_field": "shhh",  # NOT in allow-list
+            "internal_debug_state": [1, 2, 3],  # NOT in allow-list
         }
 
     _audit_call(reg, "get_initialization_status", {}, _fake)

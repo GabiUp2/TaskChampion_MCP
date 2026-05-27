@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -26,6 +25,7 @@ DEV_SH = PROJECT_ROOT / "dev.sh"
 # ---------------------------------------------------------------------------
 # Helpers — replicate the Python snippets embedded in dev.sh
 # ---------------------------------------------------------------------------
+
 
 def upsert_mcp_entry(cfg_path: Path, cmd: str, args: list[str]) -> dict:
     """Python equivalent of _upsert_mcp_entry in dev.sh."""
@@ -51,11 +51,13 @@ def remove_mcp_entry(cfg_path: Path) -> dict:
 # _upsert_mcp_entry tests
 # ---------------------------------------------------------------------------
 
-class TestUpsertMcpEntry:
 
+class TestUpsertMcpEntry:
     def test_creates_file_if_missing(self, tmp_path):
         cfg = tmp_path / "claude_desktop_config.json"
-        result = upsert_mcp_entry(cfg, "wsl.exe", ["-e", "/venv/bin/python", "-m", "taskchampion_mcp.server"])
+        result = upsert_mcp_entry(
+            cfg, "wsl.exe", ["-e", "/venv/bin/python", "-m", "taskchampion_mcp.server"]
+        )
         assert cfg.exists()
         assert result["mcpServers"]["taskchampion"]["command"] == "wsl.exe"
 
@@ -66,7 +68,11 @@ class TestUpsertMcpEntry:
 
     def test_preserves_existing_keys(self, tmp_path):
         cfg = tmp_path / "config.json"
-        cfg.write_text(json.dumps({"preferences": {"theme": "dark"}, "mcpServers": {"other": {"command": "npx"}}}))
+        cfg.write_text(
+            json.dumps(
+                {"preferences": {"theme": "dark"}, "mcpServers": {"other": {"command": "npx"}}}
+            )
+        )
         result = upsert_mcp_entry(cfg, "wsl.exe", ["-e", "/venv/bin/python", "-m", "x"])
         assert result["preferences"]["theme"] == "dark"
         assert "other" in result["mcpServers"]
@@ -82,7 +88,9 @@ class TestUpsertMcpEntry:
 
     def test_output_is_valid_json(self, tmp_path):
         cfg = tmp_path / "config.json"
-        upsert_mcp_entry(cfg, "wsl.exe", ["-e", "/path/bin/python", "-m", "taskchampion_mcp.server"])
+        upsert_mcp_entry(
+            cfg, "wsl.exe", ["-e", "/path/bin/python", "-m", "taskchampion_mcp.server"]
+        )
         parsed = json.loads(cfg.read_text())
         assert isinstance(parsed, dict)
 
@@ -107,8 +115,8 @@ class TestUpsertMcpEntry:
 # _remove_mcp_entry tests
 # ---------------------------------------------------------------------------
 
-class TestRemoveMcpEntry:
 
+class TestRemoveMcpEntry:
     def test_removes_taskchampion_key(self, tmp_path):
         cfg = tmp_path / "config.json"
         upsert_mcp_entry(cfg, "wsl.exe", ["-e", "/venv/bin/python"])
@@ -117,22 +125,30 @@ class TestRemoveMcpEntry:
 
     def test_preserves_other_servers(self, tmp_path):
         cfg = tmp_path / "config.json"
-        cfg.write_text(json.dumps({
-            "mcpServers": {
-                "taskchampion": {"command": "wsl.exe", "args": []},
-                "other-server": {"command": "npx", "args": ["@other/server"]},
-            }
-        }))
+        cfg.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "taskchampion": {"command": "wsl.exe", "args": []},
+                        "other-server": {"command": "npx", "args": ["@other/server"]},
+                    }
+                }
+            )
+        )
         result = remove_mcp_entry(cfg)
         assert "taskchampion" not in result["mcpServers"]
         assert "other-server" in result["mcpServers"]
 
     def test_preserves_non_mcp_keys(self, tmp_path):
         cfg = tmp_path / "config.json"
-        cfg.write_text(json.dumps({
-            "preferences": {"theme": "dark"},
-            "mcpServers": {"taskchampion": {"command": "wsl.exe", "args": []}},
-        }))
+        cfg.write_text(
+            json.dumps(
+                {
+                    "preferences": {"theme": "dark"},
+                    "mcpServers": {"taskchampion": {"command": "wsl.exe", "args": []}},
+                }
+            )
+        )
         result = remove_mcp_entry(cfg)
         assert result["preferences"]["theme"] == "dark"
 
@@ -158,6 +174,7 @@ class TestRemoveMcpEntry:
 # ---------------------------------------------------------------------------
 # Platform-path tests — exercise the bash helper via subprocess
 # ---------------------------------------------------------------------------
+
 
 def _run_bash_helper(script: str, env: dict | None = None) -> str:
     """Run a bash snippet that sources dev.sh helpers and returns stdout."""
@@ -194,7 +211,7 @@ class TestClaudeDesktopConfigPath:
         return tmp_path
 
     def test_linux_returns_xdg_path(self, tmp_path):
-        stub_dir = self._make_uname_stub(tmp_path, "Linux")
+        self._make_uname_stub(tmp_path, "Linux")
         # Simulate a plain Linux environment (no /proc/version microsoft marker)
         script = """
 # Override /proc/version check
@@ -244,5 +261,6 @@ _claude_desktop_config_path
                 script,
                 env={"APPDATA": str(tmp_path)} if platform == "windows_shell" else {},
             )
-            assert path.endswith("claude_desktop_config.json"), \
+            assert path.endswith("claude_desktop_config.json"), (
                 f"Platform {platform}: unexpected path suffix: {path}"
+            )

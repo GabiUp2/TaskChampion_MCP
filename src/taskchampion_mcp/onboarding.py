@@ -322,8 +322,7 @@ def _role_choice_block(status: dict[str, Any]) -> dict[str, Any]:
         "recommended_role": Role.CONTRIBUTOR,
         "next_tools": ["save_initial_schema", "use_preset_schema"],
         "available_roles": [
-            {"name": name, "description": _ROLE_DESCRIPTIONS[name]}
-            for name in Role._HIERARCHY
+            {"name": name, "description": _ROLE_DESCRIPTIONS[name]} for name in Role._HIERARCHY
         ],
         "description": (
             "Role gates which tools the server registers after restart. "
@@ -1003,10 +1002,7 @@ def reconfigure_active_schema(
         if schema_name not in known:
             return {
                 "error": True,
-                "message": (
-                    f"Unknown preset '{schema_name}'. "
-                    f"Available: {sorted(known)}"
-                ),
+                "message": (f"Unknown preset '{schema_name}'. Available: {sorted(known)}"),
                 "available_presets": sorted(known),
             }
         if dry_run:
@@ -1036,8 +1032,7 @@ def reconfigure_active_schema(
             "config_file": str(cfg_path),
             "restart_required": True,
             "message": (
-                f"Schema set to preset '{schema_name}'. "
-                "Restart the MCP server to load it."
+                f"Schema set to preset '{schema_name}'. Restart the MCP server to load it."
             ),
         }
 
@@ -1057,8 +1052,7 @@ def reconfigure_active_schema(
             "restart_required": True,
             "preview": {"would_write": {"schema_path": str(resolved)}},
             "message": (
-                f"DRY RUN: would set [server].schema_path = '{resolved}'. "
-                "No file written."
+                f"DRY RUN: would set [server].schema_path = '{resolved}'. No file written."
             ),
         }
     cfg_path = upsert_server_config(schema_path=str(resolved))
@@ -1068,9 +1062,7 @@ def reconfigure_active_schema(
         "schema_path": str(resolved),
         "config_file": str(cfg_path),
         "restart_required": True,
-        "message": (
-            f"Schema path set to {resolved}. Restart the MCP server to load it."
-        ),
+        "message": (f"Schema path set to {resolved}. Restart the MCP server to load it."),
     }
 
 
@@ -1107,8 +1099,7 @@ def reconfigure_taxonomy_path(path: str, dry_run: bool = False) -> dict[str, Any
             "restart_required": True,
             "preview": {"would_write": {"taxonomy_path": str(resolved)}},
             "message": (
-                f"DRY RUN: would set [server].taxonomy_path = '{resolved}'. "
-                "No file written."
+                f"DRY RUN: would set [server].taxonomy_path = '{resolved}'. No file written."
             ),
         }
 
@@ -1118,10 +1109,7 @@ def reconfigure_taxonomy_path(path: str, dry_run: bool = False) -> dict[str, Any
         "taxonomy_path": str(resolved),
         "config_file": str(cfg_path),
         "restart_required": True,
-        "message": (
-            f"Taxonomy path set to {resolved}. Restart the MCP server to "
-            "load it."
-        ),
+        "message": (f"Taxonomy path set to {resolved}. Restart the MCP server to load it."),
     }
 
 
@@ -1197,8 +1185,7 @@ def reconfigure_role(
         "config_file": str(cfg_path),
         "restart_required": True,
         "message": (
-            f"Role set to {target} (from {current_validated}). "
-            "Restart the MCP server to apply."
+            f"Role set to {target} (from {current_validated}). Restart the MCP server to apply."
         ),
     }
 

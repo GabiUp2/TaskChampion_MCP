@@ -123,7 +123,8 @@ T-shirt size estimate.
 
 ## Maintenance
 
-- **When promoting a task from `idea` → `research`:** Add `hypothesis` describing what you are trying to answer.
+- **When promoting a task from `idea` → `research`:**
+  Add `hypothesis` describing what you are trying to answer.
 """,
         encoding="utf-8",
     )

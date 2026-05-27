@@ -9,8 +9,8 @@ import pytest
 
 from taskchampion_mcp.config import ServerConfig
 from taskchampion_mcp.init_schema import (
-    _confirm,
     _build_parser,
+    _confirm,
     _print_presets,
     _prompt,
     _resolve_role,
@@ -47,7 +47,9 @@ def test_prompt_and_confirm_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _confirm("Q", default_yes=True) is True
 
 
-def test_run_generate_branch_fails_without_tasks_or_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_generate_branch_fails_without_tasks_or_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("taskchampion_mcp.init_schema.load_config", lambda: ServerConfig())
     monkeypatch.setattr("taskchampion_mcp.init_schema.resolve_taxonomy_path", lambda **_kw: None)
     monkeypatch.setattr(
@@ -244,7 +246,10 @@ def test_print_presets_false_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_print_presets_true(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "taskchampion_mcp.init_schema.list_preset_schemas",
-        lambda: {"schema_dir": "/tmp/schemas", "presets": [{"name": "minimal", "description": "d"}]},
+        lambda: {
+            "schema_dir": "schemas",
+            "presets": [{"name": "minimal", "description": "d"}],
+        },
     )
     assert _print_presets() is True
 
@@ -263,7 +268,7 @@ def test_run_init_already_initialised_non_interactive_returns_false(
         "taskchampion_mcp.init_schema.get_initialization_status",
         lambda **_kw: {
             "needs_onboarding": False,
-            "custom_schema_path": "/tmp/schema.toml",
+            "custom_schema_path": "schema.toml",
             "taxonomy_path": None,
             "role_configured": True,
         },
