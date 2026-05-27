@@ -10,6 +10,7 @@ and starts the stdio transport (ADR 3).
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -22,7 +23,13 @@ from mcp.server.fastmcp import FastMCP
 
 from taskchampion_mcp.audit import AuditLogger
 from taskchampion_mcp.cli import TaskwarriorCLI, TimewarriorCLI
-from taskchampion_mcp.config import Role, ServerConfig, load_config
+from taskchampion_mcp.config import (
+    Role,
+    ServerConfig,
+    dump_effective_config,
+    load_config,
+    load_config_with_sources,
+)
 from taskchampion_mcp.onboarding import (
     analyse_existing_tasks as onboarding_analyse_existing_tasks,
 )
@@ -893,8 +900,53 @@ def _build_instructions(
 def main() -> None:
     """CLI entry point for taskchampion-mcp-server."""
     _configure_logging()
-    mcp = create_server()
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    cli_overrides: dict[str, tuple[Any, str]] = {}
+    if args.role:
+        cli_overrides["server.role"] = (args.role, "cli:--role")
+    if args.schema:
+        cli_overrides["server.schema"] = (args.schema, "cli:--schema")
+
+    config_path = Path(args.config).expanduser() if args.config else None
+    cfg, sources = load_config_with_sources(
+        path=config_path,
+        cwd=Path.cwd(),
+        cli_overrides=cli_overrides,
+    )
+
+    if args.config_dump:
+        print(json.dumps(dump_effective_config(cfg, sources), indent=2, sort_keys=True))
+        return
+
+    mcp = create_server(config=cfg, config_path=config_path)
     mcp.run(transport="stdio")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="TaskChampion MCP server")
+    parser.add_argument(
+        "--config",
+        default="",
+        help="Path to user config TOML (defaults to XDG path).",
+    )
+    parser.add_argument(
+        "--role",
+        choices=Role._HIERARCHY,
+        help="Override effective role for this process.",
+    )
+    parser.add_argument(
+        "--schema",
+        default="",
+        help="Override effective schema name for this process.",
+    )
+    parser.add_argument(
+        "--config-dump",
+        action="store_true",
+        help="Print effective config with provenance as JSON and exit.",
+    )
+    return parser
 
 
 if __name__ == "__main__":

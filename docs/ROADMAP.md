@@ -84,17 +84,17 @@ Resolves design-system audit findings (see commit history / changelog for full l
 
 ### Config precedence (ADR 16)
 
-- [ ] Project config: `.taskchampion-mcp.toml` lookup (cwd → first ancestor with `.git/`)
-- [ ] Env var layer: `TC_MCP_*` → dotted config keys
-- [ ] CLI flags via `argparse`: `--role`, `--schema`, `--config-dump`
-- [ ] `--config-dump` prints effective config with source provenance per key
+- [x] Project config: `.taskchampion-mcp.toml` lookup (cwd → first ancestor with `.git/`)
+- [x] Env var layer: `TC_MCP_*` → dotted config keys
+- [x] CLI flags via `argparse`: `--role`, `--schema`, `--config-dump`
+- [x] `--config-dump` prints effective config with source provenance per key
 
 ### Testing (ADR 12)
 
-- [ ] Integration test layer (`tests/integration/`) using real `task` and `timew` against ephemeral `TASKDATA`
-- [ ] Security regression corpus (`tests/security/`)
-- [ ] Gold dataset fixtures per schema preset
-- [ ] CI matrix: Python 3.10/3.11/3.12 × TW 3.0/3.x-latest
+- [x] Integration test layer (`tests/integration/`) using real `task` and `timew` against ephemeral `TASKDATA`
+- [x] Security regression corpus (`tests/security/`)
+- [x] Gold dataset fixtures per schema preset
+- [x] CI matrix: Python 3.10/3.11/3.12 × TW 3.0/3.x-latest
 - [ ] Coverage gate at 85% for `src/taskchampion_mcp/`
 
 ### Tooling additions
