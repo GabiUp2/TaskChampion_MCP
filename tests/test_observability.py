@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from taskchampion_mcp.audit import AuditLogger
+from taskchampion_mcp.rate_limiter import RateLimiter
 from taskchampion_mcp.server import _audit_call, _configure_logging
 
 
@@ -90,10 +91,20 @@ def test_log_level_can_be_overridden_with_environment_variable(monkeypatch) -> N
 
 
 class _ToolRegistryStub:
-    """Just enough surface for _audit_call: a single ``.audit`` attribute."""
+    """Just enough surface for _audit_call: ``.audit`` + ``.limiter`` attributes."""
 
-    def __init__(self, audit: AuditLogger) -> None:
+    def __init__(
+        self,
+        audit: AuditLogger,
+        limiter: RateLimiter | None = None,
+    ) -> None:
         self.audit = audit
+        # Generous defaults so most tests don't trip the rate limiter.
+        self.limiter = limiter or RateLimiter(
+            ops_per_minute=10_000,
+            ops_per_hour=10_000,
+            creates_per_hour=10_000,
+        )
 
 
 def _fresh_audit_logger(log_path: Path) -> AuditLogger:
@@ -233,3 +244,61 @@ def test_audit_call_curates_only_known_summary_keys(tmp_path: Path) -> None:
     assert "task_count" in result
     assert "secret_internal_field" not in result
     assert "internal_debug_state" not in result
+
+
+def test_audit_call_returns_rate_limit_refusal_without_running_fn(tmp_path: Path) -> None:
+    """When the per-minute bucket is full, ``_audit_call`` short-circuits with a
+    structured rate_limit envelope (ADR 14) and never invokes the wrapped fn.
+    The refusal is audit-logged so attempts are visible (ADR 13)."""
+    log_path = tmp_path / "audit.log"
+    # Tiny limiter — 2 ops per minute. We'll burn both then trip on the third.
+    tiny = RateLimiter(ops_per_minute=2, ops_per_hour=10_000, creates_per_hour=10_000)
+    reg = _ToolRegistryStub(_fresh_audit_logger(log_path), limiter=tiny)
+
+    call_count = {"n": 0}
+
+    def _counted() -> dict:
+        call_count["n"] += 1
+        return {"success": True, "code": "ok"}
+
+    # First two calls succeed
+    r1 = _audit_call(reg, "get_initialization_status", {}, _counted)
+    r2 = _audit_call(reg, "get_initialization_status", {}, _counted)
+    assert r1["success"] and r2["success"]
+    assert call_count["n"] == 2
+
+    # Third call must be refused without invoking _counted
+    r3 = _audit_call(reg, "get_initialization_status", {}, _counted)
+    assert r3["error"] is True
+    assert r3["code"] == "rate_limit"
+    assert r3["details"]["bucket"] == "ops_per_minute"
+    assert r3["details"]["limit"] == 2
+    assert r3["details"]["retry_after_s"] == 60
+    # Critical: wrapped fn must NOT have been called
+    assert call_count["n"] == 2
+
+    # And the refusal is audit-logged with result_code="rate_limit"
+    entry = _read_last_json_line(log_path)
+    assert entry["tool"] == "get_initialization_status"
+    assert entry["result_code"] == "rate_limit"
+    assert entry["success"] is False
+
+
+def test_audit_call_rate_limit_independent_of_tool_name(tmp_path: Path) -> None:
+    """The limiter counts across all tools, not per-tool — exhausting the
+    budget on one tool blocks any other onboarding/reconfigure tool too.
+    This is what makes the rate limit useful against runaway loops that
+    rotate between tools."""
+    log_path = tmp_path / "audit.log"
+    tiny = RateLimiter(ops_per_minute=1, ops_per_hour=10_000, creates_per_hour=10_000)
+    reg = _ToolRegistryStub(_fresh_audit_logger(log_path), limiter=tiny)
+
+    def _ok() -> dict:
+        return {"success": True, "code": "ok"}
+
+    # First tool burns the budget
+    _audit_call(reg, "get_initialization_status", {}, _ok)
+    # Second tool, different name, must be refused
+    r2 = _audit_call(reg, "set_active_schema", {}, _ok)
+    assert r2["error"] is True
+    assert r2["code"] == "rate_limit"

@@ -180,7 +180,6 @@ Common first-run and config issues. Detailed walkthroughs live in [docs/manuals/
 | `requires_onboarding` still True after `./dev.sh init` succeeded | Wizard wrote schema but not role (pre-v0.3.0 bug) | Update to v0.3.0+. The wizard now defaults to `role = "CONTRIBUTOR"` when no `--role` is passed. |
 | Tool surface includes neither onboarding nor contributor tools | Server failed to start (check stderr) | Run `taskchampion-mcp-server` directly from a shell — the startup error goes to stderr and tells you exactly what's missing. |
 | Want to switch schemas without restart | Not yet supported — runtime reload is open work | Restart the IDE after `set_active_schema(...)` or after hand-editing `config.toml`. |
-| Wintermute / remote host — how do I install? | See `scripts/setup_remote.sh` | Run `./scripts/setup_remote.sh --help` for the bootstrap (uv-based, idempotent, supports `--dry-run`). |
 
 For deeper failure modes, every MCP tool returns a stable `error_code` field ([ADR 14](docs/adrs/ADRs.md)) and every call is audit-logged ([ADR 13](docs/adrs/ADRs.md)) at `~/.local/share/taskchampion-mcp/audit.log` by default.
 

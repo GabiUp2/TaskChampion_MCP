@@ -67,7 +67,7 @@ from taskchampion_mcp.onboarding import (
 from taskchampion_mcp.onboarding import (
     use_preset_schema as onboarding_use_preset_schema,
 )
-from taskchampion_mcp.rate_limiter import RateLimiter
+from taskchampion_mcp.rate_limiter import RateLimiter, RateLimitError
 from taskchampion_mcp.schema import TaskSchema, load_schema
 from taskchampion_mcp.tools import ToolRegistry
 
@@ -291,7 +291,7 @@ def _audit_call(
     params: dict[str, Any],
     fn: "Callable[[], dict[str, Any]]",
 ) -> dict[str, Any]:
-    """Run ``fn`` and audit-log the call.
+    """Rate-limit + run ``fn`` + audit-log the call.
 
     Returns ``fn``'s result dict (or re-raises any exception).  Emits exactly
     one ``audit.log`` entry per invocation with:
@@ -305,8 +305,47 @@ def _audit_call(
     * ``success`` and ``duration_ms``
     * ``error`` — exception message or, on a logical failure, the result's
       ``message`` field
+
+    Rate limiting (ADR 9, audit finding #4 / v0.3.2):  the configured
+    sliding-window limits apply uniformly to every onboarding and reconfigure
+    tool call, the same way they do to role-tier tools via
+    ToolRegistry._guard_rate.  Without this, a misbehaving LLM in a loop
+    could rewrite config.toml or call status repeatedly at disk-I/O speed.
+    On limit-exceeded, returns a structured ``{"error": True, "code":
+    "rate_limit", ...}`` envelope (per ADR 14) and audit-logs the refusal —
+    the wrapped ``fn`` is never executed.
     """
     t0 = time.monotonic()
+
+    # --- Rate-limit check (returns a structured envelope on refusal) -------
+    try:
+        reg.limiter.check_and_record(is_create=False)
+    except RateLimitError as exc:
+        refusal: dict[str, Any] = {
+            "error": True,
+            "code": "rate_limit",
+            "message": str(exc),
+            "details": {
+                "bucket": exc.bucket,
+                "limit": exc.limit,
+                "retry_after_s": exc.window_seconds,
+            },
+        }
+        reg.audit.log(
+            tool_name=tool_name,
+            parameters=params,
+            result=json.dumps(
+                {"bucket": exc.bucket, "limit": exc.limit},
+                default=str,
+            ),
+            result_code="rate_limit",
+            success=False,
+            duration_ms=(time.monotonic() - t0) * 1000.0,
+            error=str(exc),
+        )
+        return refusal
+
+    # --- Normal path -------------------------------------------------------
     result: dict[str, Any] | None = None
     error_msg: str | None = None
     try:
