@@ -12,6 +12,7 @@ Tools are organized by role level (ADR 5):
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -47,6 +48,7 @@ _ERROR_CODES = {
     "dry_run",
     "internal_error",
 }
+_REPORT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def _validate_code(code: str, allowed: set[str]) -> str:
@@ -458,6 +460,57 @@ class ToolRegistry:
             enum_fields=self.schema.enum_fields(),
         )
 
+    def get_task_report(self, report_name: str, filters: str = "") -> dict[str, Any]:
+        """Run a named Taskwarrior report."""
+        params = {"report_name": report_name, "filters": filters}
+        try:
+            self._guard_rate()
+            clean_report = report_name.strip()
+            if not clean_report or not _REPORT_NAME_RE.match(clean_report):
+                return _make_coded_error(
+                    "Invalid report name. Use alphanumerics, '.', '_' or '-'.",
+                    "validation_error",
+                )
+
+            filter_parts: list[str] = []
+            if filters:
+                filter_parts = sanitize_filter_expression(filters).split()
+            result, ms = _timed_call(self.task.run_report, clean_report, *filter_parts)
+            if result.ok:
+                self._log("get_task_report", params, "ok", True, ms)
+                return _make_success(
+                    f"Report '{clean_report}' retrieved.",
+                    report=result.stdout,
+                    report_name=clean_report,
+                )
+            self._log("get_task_report", params, result.stderr, False, ms, result.stderr)
+            return _make_coded_error(
+                f"Failed to run report '{clean_report}': {result.stderr}",
+                "cli_error",
+            )
+        except (RateLimitError, SanitizationError) as e:
+            self._log(
+                "get_task_report",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code=_result_code_from_exception(e),
+            )
+            return _error_from_known_exception(e)
+        except Exception as e:
+            self._log(
+                "get_task_report",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code="internal_error",
+            )
+            return _make_coded_error(f"Failed to run report: {e}", "internal_error")
+
     def timew_summary(self, period: str = ":day") -> dict[str, Any]:
         """Get Timewarrior time summary."""
         params = {"period": period}
@@ -699,9 +752,259 @@ class ToolRegistry:
             self._log("create_subtask", params, "", False, 0, str(e))
             return _make_coded_error(f"Create subtask failed: {e}", "internal_error")
 
+    def batch_create_tasks(
+        self,
+        tasks: list[dict[str, Any]],
+        dry_run: bool | None = None,
+    ) -> dict[str, Any]:
+        """Create multiple tasks with partial-result reporting."""
+        params = {"task_count": len(tasks), "dry_run": dry_run}
+        if not tasks:
+            return _make_coded_error("No tasks provided for batch creation.", "validation_error")
+
+        results: list[dict[str, Any]] = []
+        created_count = 0
+        failed_count = 0
+
+        for idx, item in enumerate(tasks):
+            if not isinstance(item, dict):
+                failed_count += 1
+                results.append(
+                    {
+                        "index": idx,
+                        "result": _make_coded_error(
+                            "Each batch entry must be an object.",
+                            "validation_error",
+                        ),
+                    }
+                )
+                continue
+
+            raw_tags = item.get("tags")
+            if isinstance(raw_tags, str):
+                tag_list: list[str] | None = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            elif isinstance(raw_tags, list):
+                tag_list = raw_tags
+            else:
+                tag_list = None
+
+            raw_extra = item.get("extra_fields")
+            extra_fields: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
+
+            task_result = self.create_task(
+                description=str(item.get("description", "")),
+                project=str(item.get("project", "")),
+                priority=str(item.get("priority", "")),
+                tags=tag_list,
+                due=str(item.get("due", "")),
+                dry_run=dry_run,
+                **extra_fields,
+            )
+
+            results.append({"index": idx, "result": task_result})
+            if task_result.get("success"):
+                created_count += 1
+                continue
+
+            failed_count += 1
+            if task_result.get("code") == "rate_limit":
+                self._log(
+                    "batch_create_tasks",
+                    params,
+                    "rate limit",
+                    False,
+                    0,
+                    result_code="rate_limit",
+                )
+                return _make_coded_error(
+                    "Batch creation stopped by rate limit.",
+                    "rate_limit",
+                    details={
+                        "created_count": created_count,
+                        "failed_count": failed_count,
+                        "total": len(tasks),
+                        "failed_index": idx,
+                        "results": results,
+                        **dict(task_result.get("details") or {}),
+                    },
+                )
+
+        self._log(
+            "batch_create_tasks",
+            params,
+            f"created={created_count} failed={failed_count}",
+            True,
+            0,
+            result_code="ok" if failed_count == 0 else "validation_error",
+        )
+        if failed_count == 0:
+            return _make_success(
+                f"Batch create succeeded for {created_count} tasks.",
+                created_count=created_count,
+                failed_count=0,
+                results=results,
+            )
+        return _make_coded_error(
+            f"Batch create completed with {failed_count} failures.",
+            "validation_error",
+            details={
+                "created_count": created_count,
+                "failed_count": failed_count,
+                "total": len(tasks),
+                "results": results,
+            },
+        )
+
     # -----------------------------------------------------------------------
     # MANAGER tools
     # -----------------------------------------------------------------------
+
+    def bulk_modify(
+        self,
+        filters: str,
+        fields: dict[str, str | list[str]],
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> dict[str, Any]:
+        """Modify all tasks matching a filter expression."""
+        params = {
+            "filters": filters,
+            "fields": fields,
+            "dry_run": dry_run,
+            "confirm_token": bool(confirm_token),
+        }
+        try:
+            self._guard_rate()
+            clean_filters = sanitize_filter_expression(filters)
+            filter_parts = clean_filters.split() if clean_filters else []
+            tasks, ms = _timed_call(self.task.export_tasks, *filter_parts)
+            if not tasks:
+                self._log("bulk_modify", params, "no tasks", False, ms, result_code="not_found")
+                return _make_coded_error(
+                    f"No tasks matched filter '{clean_filters}'.",
+                    "not_found",
+                )
+
+            task_count = len(tasks)
+            task_uuids = [str(task.get("uuid", "")) for task in tasks if task.get("uuid")]
+            if self._effective_dry_run(dry_run):
+                self._log("bulk_modify", params, "dry_run", True, ms, result_code="dry_run")
+                return _make_success(
+                    f"DRY RUN: Would modify {task_count} tasks.",
+                    code="dry_run",
+                    dry_run=True,
+                    preview={"task_count": task_count, "task_uuids": task_uuids, "fields": fields},
+                )
+
+            if self.config.require_confirmation:
+                token_subject = f"{clean_filters}:{task_count}"
+                required_token = self._confirmation_token("bulk_modify", token_subject)
+                if confirm_token != required_token:
+                    self._log(
+                        "bulk_modify",
+                        params,
+                        "confirmation_required",
+                        True,
+                        ms,
+                        result_code="confirmation_required",
+                    )
+                    return _make_success(
+                        (
+                            f"CONFIRMATION REQUIRED: Modify {task_count} tasks "
+                            f"matching '{clean_filters}'. Re-call bulk_modify "
+                            "with confirm_token from details."
+                        ),
+                        code="confirmation_required",
+                        needs_confirmation=True,
+                        details={
+                            "confirmation_token": required_token,
+                            "task_count": task_count,
+                        },
+                    )
+
+            modified_count = 0
+            failed: list[dict[str, Any]] = []
+            for uuid in task_uuids:
+                modify_result = self.modify_task(uuid=uuid, fields=fields, dry_run=False)
+                if modify_result.get("success"):
+                    modified_count += 1
+                    continue
+                failed.append({"uuid": uuid, "result": modify_result})
+                if modify_result.get("code") == "rate_limit":
+                    self._log(
+                        "bulk_modify",
+                        params,
+                        "rate limit",
+                        False,
+                        0,
+                        result_code="rate_limit",
+                    )
+                    return _make_coded_error(
+                        "Bulk modify stopped by rate limit.",
+                        "rate_limit",
+                        details={
+                            "modified_count": modified_count,
+                            "failed_count": len(failed),
+                            "task_count": task_count,
+                            "failed": failed,
+                            **dict(modify_result.get("details") or {}),
+                        },
+                    )
+
+            if failed:
+                self._log(
+                    "bulk_modify",
+                    params,
+                    f"partial success modified={modified_count} failed={len(failed)}",
+                    False,
+                    0,
+                    result_code="validation_error",
+                )
+                return _make_coded_error(
+                    f"Bulk modify completed with {len(failed)} failures.",
+                    "validation_error",
+                    details={
+                        "modified_count": modified_count,
+                        "failed_count": len(failed),
+                        "task_count": task_count,
+                        "failed": failed,
+                    },
+                )
+
+            self._log(
+                "bulk_modify",
+                params,
+                f"modified={modified_count}",
+                True,
+                0,
+            )
+            return _make_success(
+                f"Modified {modified_count} tasks.",
+                modified_count=modified_count,
+                task_count=task_count,
+            )
+        except (RateLimitError, SanitizationError) as e:
+            self._log(
+                "bulk_modify",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code=_result_code_from_exception(e),
+            )
+            return _error_from_known_exception(e)
+        except Exception as e:
+            self._log(
+                "bulk_modify",
+                params,
+                "",
+                False,
+                0,
+                str(e),
+                result_code="internal_error",
+            )
+            return _make_coded_error(f"Bulk modify failed: {e}", "internal_error")
 
     def complete_task(
         self,

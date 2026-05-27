@@ -502,6 +502,16 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         """
         return json.dumps(reg.get_schema_info())
 
+    @mcp.tool()
+    def get_task_report(report_name: str, filters: str = "") -> str:
+        """Run a named Taskwarrior report with optional filters.
+
+        Examples:
+        - report_name='next'
+        - report_name='blocked', filters='project:work'
+        """
+        return json.dumps(reg.get_task_report(report_name, filters))
+
     if reg.timew:
 
         @mcp.tool()
@@ -668,9 +678,9 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         description: str,
         project: str = "",
         priority: str = "",
-        tags: str = "",
+        tags: list[str] | None = None,
         due: str = "",
-        extra_fields: str = "",
+        extra_fields: dict[str, str] | None = None,
         dry_run: bool | None = None,
     ) -> str:
         """Create a subtask with depends: linking to a parent task.
@@ -680,18 +690,16 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             description: Task description (imperative, actionable).
             project: Project name in dot-notation (e.g. 'work.acme').
             priority: H, M, or L.
-            tags: Comma-separated tags (e.g. 'python,docker').
+            tags: List of tags (e.g. ["python", "docker"]).
             due: Due date (ISO format or Taskwarrior relative like 'eow').
-            extra_fields: JSON object of additional UDA fields.
-                Example: '{"scope": "personal", "phase": "impl"}'
+            extra_fields: Additional UDA fields.
+                Example: {"scope": "personal", "phase": "impl"}
 
         The subtask will have a 'depends' field set to the parent UUID.
         Call get_schema_info first to see required and available fields.
         """
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
-        udas: dict[str, str] = {}
-        if extra_fields:
-            udas = json.loads(extra_fields)
+        tag_list = [t.strip() for t in tags if t and t.strip()] if tags else None
+        udas: dict[str, str] = dict(extra_fields or {})
         return json.dumps(
             reg.create_subtask(
                 parent_uuid=parent_uuid,
@@ -704,6 +712,18 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 **udas,
             )
         )
+
+    @mcp.tool()
+    def batch_create_tasks(
+        tasks: list[dict[str, object]],
+        dry_run: bool | None = None,
+    ) -> str:
+        """Create many tasks in one call.
+
+        Each entry supports the same shape as create_task:
+        description, project, priority, tags, due, extra_fields.
+        """
+        return json.dumps(reg.batch_create_tasks(tasks=tasks, dry_run=dry_run))
 
 
 def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
@@ -758,6 +778,26 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Pushes local changes and pulls remote changes.
         """
         return json.dumps(reg.sync(dry_run=dry_run))
+
+    @mcp.tool()
+    def bulk_modify(
+        filters: str,
+        fields: dict[str, str | list[str]],
+        dry_run: bool | None = None,
+        confirm_token: str = "",
+    ) -> str:
+        """Modify all tasks matching filters.
+
+        Supports dry-run previews and confirmation for high-impact changes.
+        """
+        return json.dumps(
+            reg.bulk_modify(
+                filters=filters,
+                fields=fields,
+                dry_run=dry_run,
+                confirm_token=confirm_token,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------

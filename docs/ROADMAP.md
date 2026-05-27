@@ -95,14 +95,14 @@ Resolves design-system audit findings (see commit history / changelog for full l
 - [x] Security regression corpus (`tests/security/`)
 - [x] Gold dataset fixtures per schema preset
 - [x] CI matrix: Python 3.10/3.11/3.12 × TW 3.0/3.x-latest
-- [ ] Coverage gate at 85% for `src/taskchampion_mcp/`
+- [x] Coverage gate at 85% for `src/taskchampion_mcp/`
 
 ### Tooling additions
 
-- [ ] `create_subtask` (GENERATOR) — task with `depends:` linking to parent
-- [ ] `batch_create_tasks` (GENERATOR) — bulk create with rate-limit awareness
-- [ ] `bulk_modify` (MANAGER) — filter-based bulk modify with dry-run + count confirmation
-- [ ] `get_task_report` (CONTRIBUTOR) — named Taskwarrior reports
+- [x] `create_subtask` (GENERATOR) — task with `depends:` linking to parent
+- [x] `batch_create_tasks` (GENERATOR) — bulk create with rate-limit awareness
+- [x] `bulk_modify` (MANAGER) — filter-based bulk modify with dry-run + count confirmation
+- [x] `get_task_report` (CONTRIBUTOR) — named Taskwarrior reports
 
 ### Initialization UX improvements
 

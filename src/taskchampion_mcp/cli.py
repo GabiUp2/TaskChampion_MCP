@@ -222,6 +222,10 @@ class TaskwarriorCLI:
         result = _run([self._binary, "diagnostics"])
         return result.stdout if result.ok else result.stderr
 
+    def run_report(self, report_name: str, *filters: str) -> CLIResult:
+        """Run a named Taskwarrior report and return raw CLI output."""
+        return _run(self._cmd(*filters, report_name))
+
 
 # ---------------------------------------------------------------------------
 # Timewarrior commands

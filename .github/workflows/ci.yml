@@ -57,7 +57,7 @@ jobs:
             -m "not integration" \
             --cov=src/taskchampion_mcp \
             --cov-report=term-missing \
-            --cov-fail-under=0
+            --cov-fail-under=85
 
       - name: MCP protocol smoke test
         # Validates the server speaks correct MCP over stdio without a live client.
