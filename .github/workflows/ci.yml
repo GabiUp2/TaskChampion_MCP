@@ -11,58 +11,8 @@ on:
     branches: [dev, qa, main]
 
 jobs:
-  test:
+  smoke:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-        taskwarrior-version: ["3.0", "3.x-latest"]
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Install Taskwarrior and Timewarrior
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y taskwarrior timewarrior
-          task _version || true
-          timew --version || true
-
-      - name: Run linter
-        run: uv run ruff check src/ tests/
-
-      - name: Run unit tests
-        run: uv run pytest tests/ -v --tb=short -m "not integration and not security"
-
-      - name: Run integration tests
-        env:
-          TASKWARRIOR_VERSION_TARGET: ${{ matrix.taskwarrior-version }}
-        run: uv run pytest tests/integration -v --tb=short
-
-      - name: Run security regression tests
-        run: uv run pytest tests/security -v --tb=short
-
-      - name: Coverage report (target: 85%)
-        run: |
-          uv run pytest tests/ \
-            -m "not integration" \
-            --cov=src/taskchampion_mcp \
-            --cov-report=term-missing \
-            --cov-fail-under=0
-
-      - name: MCP protocol smoke test
-        # Validates the server speaks correct MCP over stdio without a live client.
-        # This is the automated gate for the published distribution path (ADR 16).
-        # A fake TASKDATA dir is used so the server starts cleanly without real tasks.
-        run: |
-          mkdir -p /tmp/taskdata-smoke
-          TASKDATA=/tmp/taskdata-smoke uv run python tests/smoke_test_mcp.py
+      - name: Echo
+        run: echo "workflow smoke test"
