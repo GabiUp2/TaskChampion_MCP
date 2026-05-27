@@ -14,6 +14,8 @@ This roadmap is organized around three release tracks:
 
 This is the current release. It established the security baseline (ADR 9), the role system (ADR 5), schema presets (ADR 7), and the onboarding flow.
 
+**Initialization status:** Manual configuration completed (config.toml + schema preset selection). Full onboarding flow tools implemented but UX clarity needs improvement for first-time users.
+
 ### Core MCP tools
 
 **CONTRIBUTOR** (read + annotate + modify):
@@ -101,6 +103,13 @@ Resolves design-system audit findings (see commit history / changelog for full l
 - [ ] `batch_create_tasks` (GENERATOR) — bulk create with rate-limit awareness
 - [ ] `bulk_modify` (MANAGER) — filter-based bulk modify with dry-run + count confirmation
 - [ ] `get_task_report` (CONTRIBUTOR) — named Taskwarrior reports
+
+### Initialization UX improvements
+
+- [ ] Improve clarity of required initialization steps for first-time users
+- [ ] Add explicit "quick start" guide for manual config.toml editing
+- [ ] Document when to use full onboarding flow vs manual preset selection
+- [ ] Add initialization troubleshooting section to README
 
 ---
 
