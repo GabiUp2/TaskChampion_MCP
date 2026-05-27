@@ -698,9 +698,12 @@ The `code` field is **new** and is added to both success and error envelopes. Ex
 | `schema_unset` | First-run onboarding required before this tool can run | No — run onboarding flow |
 | `confirmation_required` | Destructive op needs second call | No — re-call with explicit confirm |
 | `dry_run` | Preview only, no execution occurred | N/A — not an error |
+| `role_elevation_forbidden` | `set_role` was asked to raise role above current; refused by design per ADR 17 | **Not retryable via MCP.** User must elevate out-of-band: `./dev.sh init --role <ROLE>` or hand-edit `~/.config/taskchampion-mcp/config.toml`, then restart the MCP server. |
 | `internal_error` | Unhandled exception caught at the tool boundary | Yes, with backoff |
 
 Codes are stable identifiers. Adding a new code is a MINOR version bump (ADR 15). Removing or repurposing a code is a MAJOR version bump.
+
+`role_elevation_forbidden` was added in v0.3.2 to inventory the refusal class introduced by ADR 17 (Role-Elevation Asymmetry). It is structurally a refusal, not a validation error: the input was well-formed and the request well-understood — only the security policy refuses to execute it. Keeping it as a distinct code lets dashboards / SIEM queries count self-elevation attempts cleanly.
 
 ### 3. Dry-run and confirmation contract
 
