@@ -159,6 +159,17 @@ that lets users change schema/taxonomy/role mid-flight (downgrade only).
 
 ---
 
+## v0.3.1 — Released (stabilisation checkpoint)
+
+**State described by this release:** The post-v0.3.0 stabilisation snapshot on `dev`, focused on delivery reliability and operator clarity rather than new protocol surface.
+
+- [x] CI developer extras corrected so lint/test toolchain dependencies install consistently
+- [x] Onboarding and troubleshooting documentation tightened for faster first-run recovery
+- [x] Reporting and batch task creation capabilities integrated into the tool surface
+- [x] Version metadata remains in the v0.3 line; no release-gate changes for v1.0
+
+---
+
 ## v0.4.0 — HTTP/SSE transport and auth
 
 **Theme**: Add the second transport so ChatGPT and Codex become reachable. Stays pre-1.0 until target compatibility is verified.
