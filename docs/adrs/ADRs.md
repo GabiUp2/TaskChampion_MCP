@@ -1083,6 +1083,166 @@ Every successful configuration mutation MUST emit one audit log entry per ADR 13
 ### Cons
 - Genuine "I want to give Claude MANAGER for this one task" workflows require leaving the chat for one CLI command. Acceptable friction — it's the feature.
 - Two ways now exist to change role (CLI wizard / hand-edit + restart, vs. downgrade-only MCP tool). Document both prominently in `docs/manuals/`.
-- Reconfiguration tools take effect on next IDE restart (runtime reload not yet implemented; see the runtime reload handoff doc on `dev`). Until that lands, the "restart required" hint is non-negotiable in every tool response.
+- Reconfiguration tools take effect on next IDE restart (runtime reload not yet implemented; see ADR 19). Until that lands, the "restart required" hint is non-negotiable in every tool response.
 - The schema/taxonomy mutators technically affect what fields the LLM treats as valid for subsequent operations. A confused-deputy variant exists where a malicious task description tricks the LLM into pointing taxonomy at a forged file. Mitigation: validate the file exists before persisting, and audit-log the path change so a human review can catch it.
+
+---
+
+# ADR 19: Runtime Reload — Stable Tool Surface + Runtime State Checks + `reload_configuration` Tool
+
+**Date:** 2026-05-27
+**Status:** Proposed (implementation pending)
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+Several v0.3.x features (onboarding completion, ADR 17 reconfigure tools, `setup_remote.sh` config seeding) end with the same instruction: **"Restart your IDE to load the new configuration."** This is friction. After a successful `use_preset_schema("authors_custom_example")` or `set_role("CONTRIBUTOR")` call, the LLM should be able to immediately use the new state — not ask the user to close and reopen Windsurf/Cursor/Claude Code.
+
+The MCP protocol does support dynamic tool-list signalling (`capabilities.tools.listChanged = true` + `notifications/tools/list_changed`), but client support varies enough that we cannot rely on it as the primary mechanism. We need a pattern that works on every MCP client today, regardless of whether it honours the listChanged notification.
+
+The current design has two structural problems that block runtime reload:
+
+1. **Startup-time tool selection.** `create_server()` reads `requires_onboarding(config)` once and registers either the 8 onboarding tools or the role-tier tools. Once registered, the tool surface is frozen for the life of the process.
+2. **No reload primitive.** Even if the tool list could be re-registered, there is no central function that reloads schema, role, taxonomy, rate limiter, and audit logger from disk.
+
+A detailed handoff doc (`docs/llm_context/mcp_runtime_reload_pattern.md`) was written but never formalised. v0.3.2 promotes that handoff into a proper ADR so the design is auditable and the implementation can be tracked against a fixed contract.
+
+## Decision
+
+Implement runtime reload via **stable tool surface + per-tool runtime state checks**, supplemented (when safe) by `tools/list_changed` notifications.
+
+The architectural shift, stated in one line:
+
+> Tool registration is decoupled from operational state.
+
+Concretely:
+
+1. **Register the full intended tool surface at startup.** Onboarding tools, contributor tools, generator tools, manager tools, reconfigure tools — all registered every time, regardless of `requires_onboarding`. Role gating moves from registration-time to per-call runtime check.
+
+2. **Per-tool runtime gates.** Each non-onboarding tool, before doing work, checks: (a) is the server initialised? (b) does the configured role permit this operation? (c) is the schema loaded? If any check fails, the tool returns a structured non-mutating envelope per ADR 14 with the appropriate `code`:
+   - `schema_unset` when initialisation is incomplete
+   - role refusal (new code or reused — TBD during implementation) when the operation exceeds the configured role
+
+3. **`reload_configuration` MCP tool.** A new tool that:
+   - Re-reads `config.toml` via `load_config()`
+   - Re-loads the schema object
+   - Re-initialises rate limiter + audit logger if security/observability settings changed
+   - Re-creates Taskwarrior/Timewarrior wrappers if their binaries or rc paths changed
+   - Returns `{ "success": true, "reloaded": true, "restart_required": false, ... }`
+   - Available at CONTRIBUTOR level (it does not grant capabilities — just refreshes state)
+
+4. **Onboarding write tools call reload automatically.** `save_initial_schema` and `use_preset_schema` (and the v0.3.0 reconfigure tools) trigger an in-process reload on success, so the next tool call sees the new state without an explicit `reload_configuration`.
+
+5. **MCP listChanged as a hint, not a contract.** If the underlying MCP SDK supports it cleanly, declare `tools.listChanged = true` and emit `notifications/tools/list_changed` when the effective surface changes. Clients that ignore the notification will still see correct behaviour because the tool surface itself never actually changed — only the runtime state behind each tool.
+
+## Alternatives Considered
+
+- **Rely solely on `tools/list_changed` notifications.** Cleanest in theory; in practice not every MCP client refreshes its tool list on this signal. Would leave a portion of the install base needing restarts anyway. Rejected as primary.
+- **Force IDE restart (status quo).** Honest about the current implementation; bad UX. Acceptable as a v0.3.x stopgap, unacceptable as a v1.0 product behaviour.
+- **Separate "init" and "runtime" servers spawned by the IDE.** Two processes, IDE switches between them after onboarding completes. Doubles deployment complexity; clients would need explicit support. Rejected.
+- **Polling-based reload (server re-reads config.toml every N seconds).** Eventually consistent; introduces a race where a tool call sees stale state. Rejected.
+
+## Consequences
+
+### Pros
+- Works on every MCP client today, regardless of `listChanged` support.
+- LLM workflows become single-conversation: select preset → immediately use the schema, no human in the loop.
+- Existing structured-envelope contract (ADR 14) absorbs the new "tool exists but is gated" states cleanly via `code: "schema_unset"` etc.
+- `reload_configuration` is also useful outside onboarding: pick up rate-limit changes, schema TOML edits, audit-log path changes, all without restart.
+
+### Cons
+- Every non-onboarding tool gains a small preamble (the runtime check). Mitigated by a shared helper (`_call_runtime_tool` or similar) — same pattern as `_audit_call`.
+- The tool list reported by `tools/list` no longer changes based on initialisation state. Curious LLMs that introspect their surface may try to call tools that are gated. The structured refusal response is the answer.
+- `safe_to_mutate_tasks` becomes a runtime concept, not a registration-time one. Status payloads need to reflect this consistently.
+- The `requires_onboarding` semantics already in the codebase (per ADR 17) need a careful refactor so that registration-time decisions don't conflict with runtime checks.
+
+## Implementation acceptance criteria
+
+A v0.3.x or v0.4.x patch closing this ADR is considered done when:
+
+1. `tools/list` returns the same set in both onboarding-mode and post-onboarding-mode configurations (smoke-test scenarios collapse).
+2. Calling `use_preset_schema("authors_custom_example")` against an uninitialised server, followed immediately by `get_schema_info`, returns the new schema name without restart.
+3. `reload_configuration` exists, is registered at CONTRIBUTOR, and round-trips through hand-edits of `config.toml`.
+4. Role refusals carry a structured `code` per ADR 14 (no English-only error strings).
+5. Tests cover: stale state before initialisation, immediate post-onboarding visibility, explicit reload after hand-edit, role gating remains enforced, Timewarrior-absent fallback.
+
+## Cross-references
+
+- ADR 5 — Role system (the gating now moves to runtime)
+- ADR 14 — Error model (`schema_unset` already inventoried; refusal codes for gating use the same closed set)
+- ADR 17 — Role-elevation asymmetry (reload does not weaken this; runtime checks still refuse elevation)
+- `docs/llm_context/mcp_runtime_reload_pattern.md` — the original IDE-agent handoff doc this ADR formalises. Will be marked superseded once implementation lands.
+
+---
+
+# ADR 20: Remote-Host Bootstrap — `scripts/setup_remote.sh`
+
+**Date:** 2026-05-27
+**Status:** Accepted
+**Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
+
+## Context
+
+Users running TaskChampion MCP on multiple hosts (e.g. the author's personal `Seraph` workstation and the `Wintermute` remote box) need a way to install the server and wire it into Claude Code on a fresh remote without:
+
+- Cloning the dev tree onto every box just to run `./dev.sh install`
+- Hand-translating the dev-install path into something published-distribution-shaped
+- Forgetting one of the four moving parts (`uv tool install`, `claude mcp add`, `config.toml` seed, role/schema choice) and ending up with a half-wired server
+
+A wider design context: ADR 18 (Installation Strategy) draws the line between `dev.sh install` (developer convenience, points Claude Desktop/etc. at a local checkout) and the published distribution path (`uvx taskchampion-mcp` on Linux/macOS, `wsl.exe bash -lc "uvx taskchampion-mcp"` on WSL). The remote-host bootstrap sits squarely on the published-distribution side: it is what a user runs on a machine they're treating as a *user* of taskchampion-mcp, not a contributor.
+
+## Decision
+
+Ship a single self-contained shell script — `scripts/setup_remote.sh` — that bootstraps a remote Linux host end-to-end.
+
+Key design choices:
+
+1. **`uv tool install` as the package delivery primitive.** Three sources supported via `--source`:
+   - `git_dev` — `uv tool install --from git+<repo>@dev taskchampion-mcp`; gets latest in-flight features. Default.
+   - `git_main` — `uv tool install --from git+<repo>@main taskchampion-mcp`; latest published merges.
+   - `pypi` — `uv tool install taskchampion-mcp`; current PyPI release.
+   The `--source` flag is the only user-facing knob for the delivery channel; everything else (force-replace existing install, idempotent re-runs) is handled by the script.
+
+2. **Claude Code via `claude mcp add` at `user` scope.** The script wires the installed `taskchampion-mcp-server` binary into Claude Code's user-scoped MCP config. User scope is correct because taskchampion is task-database scoped, not project scoped — the same MCP server should work from any directory inside any `claude` session.
+
+3. **Config.toml seeded by the script.** Two keys (`role` + `schema`) are the minimum to leave onboarding mode. The script writes them based on `--role` and `--schema` flags (defaults: `GENERATOR` + `authors_custom_example` for Wintermute-style autonomous operation; overridable).
+
+4. **Check-only prereq policy by default.** The script verifies `uv`, `claude`, `task`, `timew` are present and reports clearly what's missing. It does NOT auto-install them unless `--auto-prereqs` is explicitly passed. Rationale: installing system packages without explicit consent is a footgun on a remote box; the user is one shell command away from doing it themselves.
+
+5. **Idempotent.** Re-running on a configured host: `uv tool install --force` replaces the existing install; `claude mcp remove taskchampion` runs before `add` so duplicate-entry errors don't trip; existing `config.toml` is backed up with a timestamped suffix before overwrite.
+
+6. **`--dry-run` mode.** Every step prints what it would do and stops short of mutating anything. Used in CI to validate the script without needing a real `uv tool` environment.
+
+7. **No SSH plumbing.** The script runs *on* the target host. Delivery (SCP, git clone, `cat | ssh ... bash`) is a separate concern handled by whatever the user uses to reach the host. This keeps the script's surface area small and testable.
+
+## Alternatives Considered
+
+- **Ansible / Nix module / Salt formula.** Heavyweight; introduces a transitive dependency on configuration-management tooling. Worth doing if the project ever grows a fleet-orchestration story; overkill at single-user scale.
+- **`pipx install` instead of `uv tool install`.** Equivalent in spirit, slower install, dependency on a tool many of the target audience don't use. Rejected since the rest of the project standardises on `uv` (ADR 2).
+- **A Makefile target on the host (`make install-remote`).** Requires the repo to be present on the remote, which negates the "no clone needed" property of `uv tool install --from git+...`. Rejected.
+- **`pip install` from a wheel hosted on a private artifact server.** Closer to "enterprise" patterns but adds infrastructure. Defer until there is demand.
+- **Hardcoded role/schema defaults with no overrides.** Rejected because Wintermute (autonomous, GENERATOR-level) and a personal laptop (interactive, CONTRIBUTOR-level) want different defaults from the same script.
+
+## Consequences
+
+### Pros
+- One file delivers a working install on any Linux box with Claude Code and Taskwarrior already present. The "hello world" of running the project on a new host is `scp scripts/setup_remote.sh wintermute: && ssh wintermute ./setup_remote.sh`.
+- Source flexibility: a contributor can bootstrap from `git_dev` to get bleeding-edge fixes; a stable-only operator uses `pypi`. Both modes share the same downstream wiring.
+- The check-only prereq policy keeps the script honest about what it touches.
+- Idempotent + backed-up config.toml means re-running is safe — no "did I already run this?" mental overhead.
+
+### Cons
+- Linux-only. macOS and WSL would work in principle (everything used is portable) but are not in the validated path; an ADR amendment will cover them when the testing matrix expands.
+- Claude Code is required. Hosts without `claude` on PATH get a clear error and exit — but if a user wanted to run taskchampion-mcp under a different MCP client on a remote, they'd need a different script.
+- `uv tool install` from git fetches the entire repo, not just the package. Acceptable today (the repo is small) but worth revisiting if the install size becomes a concern.
+- The script's defaults bake in opinions (`GENERATOR` + `authors_custom_example`). These are documented and overridable, but a user who runs the script blind ends up with the author's defaults. Documentation in `MESSAGE_TO_WINTERMUTE.md` and `--help` mitigates.
+
+## Cross-references
+
+- ADR 2 — Language and tooling (`uv` standardisation)
+- ADR 9 — Security baseline (role + schema seeded by the script must align with the rest of the security model)
+- ADR 17 — Role-elevation asymmetry (`--role MANAGER` via this script is one of the legitimate out-of-band elevation paths)
+- ADR 18 — Installation Strategy (this script is the user-side counterpart to `dev.sh install`)
+- `scripts/MESSAGE_TO_WINTERMUTE.md` — agent-facing setup brief shipped alongside the script.
+
 
