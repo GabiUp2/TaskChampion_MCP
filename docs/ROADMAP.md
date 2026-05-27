@@ -106,10 +106,56 @@ Resolves design-system audit findings (see commit history / changelog for full l
 
 ### Initialization UX improvements
 
-- [ ] Improve clarity of required initialization steps for first-time users
-- [ ] Add explicit "quick start" guide for manual config.toml editing
-- [ ] Document when to use full onboarding flow vs manual preset selection
-- [ ] Add initialization troubleshooting section to README
+- [x] Improve clarity of required initialization steps for first-time users
+      — README `## First Run` section walks through the three paths (LLM-driven,
+      CLI wizard, hand-edit) with the two-key requirement (`role` + `schema`)
+      stated up front
+- [x] Add explicit "quick start" guide for manual config.toml editing
+      ([`docs/manuals/quick_start.md`](manuals/quick_start.md))
+- [x] Document when to use full onboarding flow vs manual preset selection
+      ([`docs/manuals/initialization_flows.md`](manuals/initialization_flows.md))
+- [x] Add initialization troubleshooting section to README
+      (10-row symptom/cause/fix table covering the common gotchas)
+
+### Onboarding completion + reconfiguration (ADR 17)
+
+Closes the original "schema persisted but role never set → server stuck in
+onboarding forever" regression and adds the LLM-driven reconfigure surface
+that lets users change schema/taxonomy/role mid-flight (downgrade only).
+
+- [x] `upsert_server_config` accepts `role`; validates against `Role` enum
+      before any disk write
+- [x] `save_initial_schema` / `use_preset_schema` accept `role` and default to
+      `CONTRIBUTOR` when `update_config=True`, so onboarding completion
+      always satisfies `requires_onboarding == False`
+- [x] CLI wizard (`./dev.sh init`) accepts `--role` flag + interactive prompt
+- [x] `get_initialization_status` surfaces `active_role`, `role_configured`,
+      `needs_role_selection`, `available_roles`
+- [x] `propose_initialization_options` returns a self-describing `roles` block
+      alongside schema options
+- [x] New MCP tools at CONTRIBUTOR level: `set_active_schema`,
+      `set_taxonomy_path`, `set_role` — all audit-logged
+- [x] Role asymmetry enforced: `set_role` accepts downgrade and same-level
+      no-op; rejects upgrade with `error_code = "role_elevation_forbidden"`
+      and refuses to touch disk
+- [x] ADR 17 — full threat model (prompt injection via task content,
+      misaligned tool selection, upstream compromise) + POSIX setuid analogy
+
+### Install path coverage
+
+- [x] Fix Linux Claude Desktop config path casing (`~/.config/claude/` →
+      `~/.config/Claude/`) — was a silent install failure on case-sensitive
+      Linux filesystems
+- [x] Tighten `test_linux_returns_xdg_path` to assert exact capitalisation
+      so a future lowercase regression fails CI
+- [x] Add `claude-code` install target to `dev.sh` (uses `claude mcp add`
+      CLI, not JSON file rewriting) — install/uninstall/reinstall/clean all
+      wired up
+- [x] `scripts/setup_remote.sh` — portable, idempotent, dry-run-able
+      bootstrap for remote Linux hosts. Uses `uv tool install` from PyPI or
+      a pinned git ref; seeds `config.toml` with role + schema preset
+- [x] Isolate XDG_CONFIG_HOME in `tests/smoke_test_mcp.py` so the smoke test
+      no longer depends on the local developer's onboarding state
 
 ---
 
