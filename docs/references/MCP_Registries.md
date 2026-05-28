@@ -50,6 +50,14 @@ Verified May 2026.
 
 Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../MARKETPLACE_SUBMISSIONS.md).
 
+Check live / pending status across platforms:
+
+```bash
+./scripts/check_marketplace_visibility.py
+./scripts/check_marketplace_visibility.py --json
+./scripts/check_marketplace_visibility.py --strict   # gate on PyPI + MCP Registry + Smithery
+```
+
 **Pre-release gate:** [`docs/manuals/release_checklist.md`](../manuals/release_checklist.md) — verify before tagging (PyPI Trusted Publishing, `server.json`, `pypi` environment, retag vs rerun).
 
 | Target | Status | Notes |
