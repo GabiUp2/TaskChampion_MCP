@@ -205,6 +205,7 @@ uv run pytest tests/ --ignore=tests/targets -q
 | MCP Registry 422 on `registryType` | Snake_case `server.json` fields |
 | Workflow still runs old steps after merge | Tag not moved to `main`; used `gh run rerun` instead |
 | README PyPI badge red (“package or version not found”) | Tag pushed before PyPI publish finished, or shields.io cache; verify https://pypi.org/pypi/taskchampion-mcp/json shows the version |
+| GitHub release badge red (“no releases or repo not found”) | Repo is **private** — shields.io cannot read GitHub Releases API without auth; use a static `badge/release-vX.Y.Z` badge until the repo is public, or drop the badge and link the release in prose |
 | GitHub release badge red | Tag exists but no GitHub Release object — run `gh release create vX.Y.Z` |
 | PyPI project page missing links | Add `[project.urls]` in `pyproject.toml` (published on next release) |
 
@@ -215,12 +216,13 @@ uv run pytest tests/ --ignore=tests/targets -q
 After tagging:
 
 1. Confirm PyPI lists the version: `curl -sS https://pypi.org/pypi/taskchampion-mcp/json | jq -r .info.version`
-2. Create a **GitHub Release** (not just a tag) so the release badge works:
+2. Create a **GitHub Release** (not just a tag) so members can browse assets and notes:
    ```bash
    gh release create v1.0.0 --title "v1.0.0" --notes-file docs/releases/v1.0.0.md
    ```
+   **Private repos:** do not use `img.shields.io/github/v/release/...` — it always fails. Use a static badge (`badge/release-v1.0.0-blue`) or the prose “Latest release” line instead. Switch to the dynamic badge after making the repo public.
 3. Ensure `pyproject.toml` includes `[project.urls]` (Homepage, Repository, Changelog) so PyPI shows correct links on the next publish.
-4. If shields.io badges stay red briefly, hard-refresh the README or wait a few minutes for cache expiry.
+4. If shields.io PyPI badges stay red briefly, hard-refresh the README or wait a few minutes for cache expiry.
 
 ---
 
