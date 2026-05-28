@@ -114,15 +114,14 @@ jobs:
 
       - name: Install mcp-publisher
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_linux_amd64.tar.gz" | tar xz mcp-publisher
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
           sudo mv mcp-publisher /usr/local/bin/
+          mcp-publisher --version
 
       - name: Authenticate with MCP Registry (GitHub OIDC)
-        # The publisher CLI's subcommand surface changed: `authenticate --github`
-        # → `login github-oidc`. Tracked at
-        # https://github.com/modelcontextprotocol/registry — the registry is
-        # still pre-1.0 so this may shift again; if it does, pin or vendor.
-        run: mcp-publisher login github-oidc
+        # Registry v1.7.6+ validates OIDC audience per deployment URL.
+        # Older publisher binaries request audience "mcp-registry" and fail with 401.
+        run: mcp-publisher login github-oidc --registry=https://registry.modelcontextprotocol.io
 
       - name: Publish to MCP Registry
         run: mcp-publisher publish
