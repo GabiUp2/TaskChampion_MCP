@@ -12,7 +12,8 @@ and the GitHub Actions `publish.yml` workflow.
 
 ## 1. mcp.so — GitHub Issue Submission
 
-> Submit at: https://github.com/chatmcp/mcp-directory/issues/new
+> Submit at: https://github.com/chatmcp/mcpso/issues/new  
+> **Submitted:** [chatmcp/mcpso#2552](https://github.com/chatmcp/mcpso/issues/2552) (awaiting review)
 
 **Title:** `[New Server] TaskChampion MCP — Taskwarrior 3.x task management`
 
@@ -31,22 +32,56 @@ stdio
 ### Auth
 None (local server)
 
-### Tools
+### Tools (35)
+
+**Runtime & onboarding**
+- `get_runtime_capabilities` — Return the server's current mode, role, schema, and callable tool groups
+- `reload_configuration` — Re-read config.toml and refresh all runtime state without restart
+- `get_initialization_status` — Inspect first-run onboarding state
+- `propose_initialization_options` — Return onboarding choices for the user
+- `analyze_existing_tasks_for_schema` — Analyse existing tasks for schema inference
+- `analyze_taxonomy_file` — Parse a taxonomy Markdown file
+- `generate_initial_schema_preview` — Generate a reviewable schema TOML preview
+- `save_initial_schema` — Persist an approved schema and update config
+- `list_preset_schemas` — List bundled preset schemas
+- `use_preset_schema` — Wire a bundled preset into config.toml
+
+**Read & search**
 - `list_tasks` — List tasks matching optional filter expressions
-- `get_task` — Get full task details by UUID
-- `search_tasks` — Search tasks by keyword or regex
+- `get_task` — Get full details for a single task by UUID
+- `search_tasks` — Search tasks by field
 - `get_projects` — List all project names
 - `get_tags` — List all tags
-- `get_schema_info` — Get schema definition for LLM context
-- `annotate_task` — Add annotation to a task
+- `get_active_context` — Show the active Taskwarrior context
+- `get_schema_info` — Return the loaded schema definition
+- `get_task_report` — Run a named Taskwarrior report
+
+**Modify (CONTRIBUTOR+)**
+- `annotate_task` — Add an annotation to a task
 - `modify_task` — Modify fields on an existing task
+- `start_task` — Start working on a task
+- `stop_task` — Stop working on a task
+
+**Timewarrior**
+- `get_time_summary` — Get Timewarrior time tracking summary
+- `get_time_status` — Check if Timewarrior is tracking
+
+**Reconfigure**
+- `set_active_schema` — Switch the active task schema
+- `set_taxonomy_path` — Update the taxonomy file path
+- `set_role` — Change the persisted role (downgrade only)
+
+**Create (GENERATOR+)**
 - `create_task` — Create a new task with schema validation
-- `complete_task` — Mark task as done
+- `create_subtask` — Create a subtask linked to a parent
+- `batch_create_tasks` — Create many tasks in one call
+
+**Lifecycle (MANAGER+)**
+- `complete_task` — Mark a task as done
 - `delete_task` — Delete a task
-- `undo_last_action` — Undo last Taskwarrior operation
+- `undo_last_action` — Undo the last Taskwarrior operation
 - `sync_tasks` — Trigger task sync via TaskChampion
-- `get_time_status` — Check Timewarrior tracking status
-- `get_time_summary` — Get time tracking summary
+- `bulk_modify` — Modify all tasks matching filters
 
 ### Config Snippet
 ```json
@@ -76,14 +111,16 @@ Apache-2.0
 
 > Submit at: https://github.com/punkpeye/awesome-mcp-servers
 
-Fork the repo, add the following line to the appropriate category table
-(likely **Productivity & Project Management** or **Data & File Systems**),
-and open a PR.
+Fork the repo, add a bullet under **Workplace & Productivity**
+(`#workplace-and-productivity`) in **alphabetical order** by repo slug,
+and open a PR. The list uses emoji tags (see the legend at the top of
+`README.md`), not markdown tables.
 
-**Table row to add:**
+**Bullet to add** (insert after `getalai/alai-mcp-server`, before
+`giuseppe-coco/Google-Workspace-MCP-Server`):
 
 ```markdown
-| [TaskChampion MCP](https://github.com/GabiUp2/TaskChampion_MCP) | MCP server for Taskwarrior 3.x — read, create, modify tasks and track time via Timewarrior. Schema-based validation, role-based permissions. | [GabiUp2](https://github.com/GabiUp2) |
+- [GabiUp2/TaskChampion_MCP](https://github.com/GabiUp2/TaskChampion_MCP) 🐍 🏠 🍎 🪟 🐧 - Taskwarrior 3.x (TaskChampion) and Timewarrior integration with 35 MCP tools for full task lifecycle, time tracking, schema validation, and role-based permissions. Published on PyPI and the official MCP Registry; `uvx taskchampion-mcp`.
 ```
 
 **PR title:** `feat: add TaskChampion MCP (Taskwarrior 3.x task management)`
@@ -125,17 +162,161 @@ Timewarrior CLI tools, exposing them as structured MCP tools for any AI assistan
 
 ## 3. smithery.ai
 
-> Submit at: https://smithery.ai
+> Submit at: https://smithery.ai/new (hosted URL) or MCPB bundle (local stdio)
 
-Smithery auto-detects from GitHub and npm. To publish:
+TaskChampion MCP is a **local stdio** server (not Streamable HTTP yet). Smithery
+accepts stdio servers via an **MCPB bundle** (`.mcpb`), not the old
+`smithery publish --github` flow.
+
+### Bundle source (in repo)
+
+| File | Purpose |
+|---|---|
+| `smithery/manifest.json` | MCPB manifest (`server.type`: `python`; Smithery does not accept `uv`) |
+| `smithery/pyproject.toml` | Pins `taskchampion-mcp==1.0.0` |
+| `smithery/src/run.py` | Entry shim |
+| `scripts/publish_smithery.sh` | Pack + publish helper |
+
+### Published (v1.0.0)
+
+| Item | Value |
+|---|---|
+| Qualified name | `gabiup2/taskchampion-mcp` |
+| Server page | https://smithery.ai/servers/gabiup2/taskchampion-mcp |
+| MCP URL | https://taskchampion-mcp--gabiup2.run.tools |
+| Namespace | `gabiup2` (lowercase; created via CLI on first publish) |
+
+### Issues encountered during first publish (2026-05-28)
+
+Use this table when bumping versions or republishing. Smithery’s error strings are
+often opaque; several map to more than one root cause.
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | `Could not determine bundle runtime from manifest` | Smithery CLI rejects `server.type: "uv"` in MCPB manifest | Use `"type": "python"` in `smithery/manifest.json` (runtime still launches via `uvx` in `mcp_config`) |
+| 2 | `` `File` is not defined as a global `` | System Node 18 lacks `globalThis.File` required for bundle upload | Script prefers Cursor’s Node 22 (`ensure_node20` in `publish_smithery.sh`); fallback polyfill in `scripts/node20-file-polyfill.cjs` |
+| 3 | `Invalid input: expected object, received undefined` (×5) | `tools` array in MCPB manifest without full `inputSchema` on each tool | Omit `tools` from manifest (Smithery scans at runtime); only include tools if every entry has a complete MCP tool schema |
+| 4 | `404 Namespace not found` for `GabiUp2/taskchampion-mcp` | Namespace must exist and match account; mixed-case namespace never created | Create/use lowercase namespace: `npx @smithery/cli namespace create gabiup2`; default qualified name `gabiup2/taskchampion-mcp` |
+| 5 | `No values to set` after CLI prompts “Create server?” | Smithery CLI calls `servers.create()` with an empty `{}` body | Do not rely on CLI alone; script pre-registers via REST (PUT create + PATCH metadata) |
+| 6 | `No values to set` on `PUT /releases` (curl or CLI) | Deploy payload missing **`configSchema`** | Always include `"configSchema": {"type": "object", "properties": {}}` even when the server has no user config — **this was the final blocker** |
+| 7 | `No values to set` when using `curl -F payload=@file.json` | `-F payload=@file` sends a **file part**; API expects a **form string** | Use `--form-string 'payload={"type":"stdio",...}'` (script does this automatically) |
+| 8 | PUT server registration appeared to succeed but metadata unchanged | `PUT /servers/{qn}` is idempotent create-only (`displayName`, `description`); extra fields ignored | Extended fields (`repositoryUrl`, `homepage`, `license`) via [PATCH](https://smithery.ai/docs/api-reference/servers/update-a-server) |
+
+**False leads:** Support suggested the error always meant a malformed multipart
+field. In our case the payload was received correctly once `configSchema` was
+added; release logs showed failure at stage `deploy`, not upload parsing.
+
+**Working approach:** `./scripts/publish_smithery.sh` — MCPB pack, namespace
+ensure, REST server upsert, direct `PUT /releases` with explicit payload (not
+`smithery mcp publish` alone).
+
+### Next release checklist
+
+When publishing a new version (e.g. `1.0.1`):
+
+1. Bump `version` in `smithery/manifest.json` and pin in `smithery/pyproject.toml` (`taskchampion-mcp==…`).
+2. Update `serverCard.serverInfo.version` is derived automatically by the script from `manifest.json`.
+3. Run `./scripts/publish_smithery.sh` with a valid `SMITHERY_API_KEY`.
+4. Confirm release status at https://smithery.ai/servers/gabiup2/taskchampion-mcp/releases.
+5. Rotate API keys if they were ever pasted into terminal logs or chat.
+
+**Do not change without retesting:**
+
+- `server.type` must stay `"python"` (not `"uv"`).
+- Do not add `tools` to MCPB manifest unless each tool has full `inputSchema`.
+- Deploy payload must include empty `configSchema` (see below).
+- Qualified name format: `namespace/server` (lowercase namespace), not `@org/server`.
+
+### Publish (one-shot npx — no global npm install)
+
+1. Create an API key at https://smithery.ai/account/api-keys
+2. Run (script creates namespace `gabiup2` if missing):
 
 ```bash
-npm install -g @smithery/cli
-smithery publish --github GabiUp2/TaskChampion_MCP
+export SMITHERY_API_KEY='your-key'
+./scripts/publish_smithery.sh
 ```
 
-If the CLI isn't available, submit via the web form at https://smithery.ai/new
-with the same information from the mcp.so template above.
+Override the Smithery qualified name if needed:
+
+```bash
+export SMITHERY_QUALIFIED_NAME='your-namespace/taskchampion-mcp'
+```
+
+The publish script registers the server via REST, then uploads the MCPB bundle directly:
+
+1. [PUT /servers/{qualifiedName}](https://smithery.ai/docs/api-reference/servers/create-a-server) — create (if missing) with `displayName`, `description`
+2. [PATCH /servers/{qualifiedName}](https://smithery.ai/docs/api-reference/servers/update-a-server) — update existing server with `repositoryUrl`, `homepage`, `license`
+3. [PUT /servers/{qualifiedName}/releases](https://smithery.ai/docs/api-reference/servers/publish-a-server) — upload MCPB (bypasses Smithery CLI empty-body create)
+
+The Smithery CLI `mcp publish` path is unreliable for stdio bundles: it calls
+`servers.create()` with an empty body (also returns `No values to set`) and the
+deploy retry exits before a second attempt when the first deploy returns 400.
+
+### Troubleshooting: `No values to set`
+
+Smithery do not document this string. For stdio MCPB releases it means the deploy
+payload is missing **`configSchema`** — include an empty schema even when the
+server has no user-configurable fields:
+
+```json
+"configSchema": {"type": "object", "properties": {}}
+```
+
+Also send `payload` as a multipart form **string** (`--form-string`), not a file
+part — see [publish-a-server](https://smithery.ai/docs/api-reference/servers/publish-a-server).
+
+Required stdio payload shape (`StdioDeployPayload`):
+
+```json
+{
+  "type": "stdio",
+  "runtime": "python",
+  "configSchema": {"type": "object", "properties": {}},
+  "serverCard": {
+    "serverInfo": { "name": "taskchampion-mcp", "version": "1.0.0" }
+  }
+}
+```
+
+`configSchema` is required even when the server has no user-configurable fields —
+omitting it returns `No values to set` at deploy time.
+
+Do **not** include `tools` in `manifest.json` unless each tool has a full
+`inputSchema` object — otherwise deploy returns `expected object, received undefined`.
+
+Or manually:
+
+```bash
+cd smithery
+npx --yes @anthropic-ai/mcpb@latest pack
+export SMITHERY_API_KEY='your-key'
+npx --yes @smithery/cli@latest namespace create gabiup2   # once, if missing
+npx --yes @smithery/cli@latest namespace use gabiup2
+curl -sS -X PATCH "https://api.smithery.ai/servers/gabiup2%2Ftaskchampion-mcp" \
+  -H "Authorization: Bearer ${SMITHERY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"displayName":"TaskChampion MCP","description":"MCP server for Taskwarrior 3.x and Timewarrior.","repositoryUrl":"https://github.com/GabiUp2/TaskChampion_MCP","homepage":"https://github.com/GabiUp2/TaskChampion_MCP","license":"Apache-2.0"}'
+curl -sS -X PUT "https://api.smithery.ai/servers/gabiup2%2Ftaskchampion-mcp/releases" \
+  -H "Authorization: Bearer ${SMITHERY_API_KEY}" \
+  --form-string 'payload={"type":"stdio","runtime":"python","configSchema":{"type":"object","properties":{}},"serverCard":{"serverInfo":{"name":"taskchampion-mcp","version":"1.0.0"}}}' \
+  -F "bundle=@./smithery.mcpb;filename=smithery.mcpb;type=application/octet-stream"
+# Use --form-string for payload (JSON text field). -F payload=@file sends a file part and fails.
+```
+
+### Remove npm afterwards
+
+Recent npm supply-chain incidents make a persistent install unnecessary. This
+workflow uses `npx --yes` only. If you installed system `npm` for this step,
+remove it when done (Cursor ships its own Node runtime):
+
+```bash
+sudo apt remove -y npm
+# optional: sudo apt autoremove -y
+```
+
+Hosted URL publishing (`smithery.ai/new`) requires Streamable HTTP — deferred
+to v1.x for this project.
 
 ---
 
@@ -156,9 +337,9 @@ If manual submission is needed, use their web form with:
 
 ## Checklist
 
-- [ ] Published to PyPI (`pip install taskchampion-mcp`)
-- [ ] Published to Official MCP Registry (`mcp-publisher publish`)
-- [ ] Submitted to mcp.so (GitHub issue)
-- [ ] Submitted to awesome-mcp-servers (PR)
-- [ ] Listed on smithery.ai
+- [x] Published to PyPI (`pip install taskchampion-mcp`)
+- [x] Published to Official MCP Registry (`mcp-publisher publish`)
+- [x] Submitted to mcp.so ([issue #2552](https://github.com/chatmcp/mcpso/issues/2552))
+- [x] Submitted to awesome-mcp-servers ([PR #7065](https://github.com/punkpeye/awesome-mcp-servers/pull/7065))
+- [x] Listed on smithery.ai — https://smithery.ai/servers/gabiup2/taskchampion-mcp
 - [ ] Indexed by glama.ai (automatic)

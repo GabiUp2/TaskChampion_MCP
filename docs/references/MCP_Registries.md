@@ -23,8 +23,8 @@ Verified May 2026.
 
 | Registry | URL | Servers Indexed | Submission Method |
 |---|---|---|---|
-| **mcp.so** | https://mcp.so | 20,000+ | GitHub issue at [chatmcp/mcp-directory](https://github.com/chatmcp/mcp-directory/issues/new) |
-| **smithery.ai** | https://smithery.ai | — | CLI: `npm install -g @smithery/cli && smithery publish` or web form |
+| **mcp.so** | https://mcp.so | 20,000+ | GitHub issue at [chatmcp/mcpso](https://github.com/chatmcp/mcpso/issues/new) |
+| **smithery.ai** | https://smithery.ai | MCPB bundle via `smithery mcp publish` (stdio) or hosted URL form |
 | **glama.ai** | https://glama.ai/mcp | — | Auto-crawls GitHub repos with MCP config; manual form available |
 
 ---
@@ -33,7 +33,7 @@ Verified May 2026.
 
 | List | URL | Submission Method |
 |---|---|---|
-| **awesome-mcp-servers** | https://github.com/punkpeye/awesome-mcp-servers | Pull request adding a table row |
+| **awesome-mcp-servers** | https://github.com/punkpeye/awesome-mcp-servers | Pull request adding a bullet under the relevant category |
 | **modelcontextprotocol/servers** | https://github.com/modelcontextprotocol/servers | PR per [CONTRIBUTING.md](https://github.com/modelcontextprotocol/servers/blob/main/CONTRIBUTING.md) |
 
 ---
@@ -56,10 +56,10 @@ Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../
 |---|---|---|
 | PyPI | Published (`1.0.0`) | https://pypi.org/project/taskchampion-mcp/ |
 | Official MCP Registry | Published (`1.0.0`) | `io.github.GabiUp2/taskchampion-mcp` |
-| mcp.so | Not yet submitted | GitHub issue template ready |
-| awesome-mcp-servers | Not yet submitted | PR template ready |
-| smithery.ai | Not yet submitted | CLI or web form |
-| glama.ai | Pending auto-index | Should auto-detect from `server.json` |
+| mcp.so | Submitted | [chatmcp/mcpso#2552](https://github.com/chatmcp/mcpso/issues/2552) (awaiting review) |
+| awesome-mcp-servers | Submitted | [PR #7065](https://github.com/punkpeye/awesome-mcp-servers/pull/7065) |
+| smithery.ai | Published | `gabiup2/taskchampion-mcp` — https://smithery.ai/servers/gabiup2/taskchampion-mcp |
+| glama.ai | Not indexed yet | Manual form at https://glama.ai/mcp if needed |
 
 ---
 
@@ -79,8 +79,8 @@ Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../
 - License
 
 ### awesome-mcp-servers
-- One table row with: name (linked), description, author (linked)
-- PR to the appropriate category section
+- One bullet per server: `[owner/repo](url) emojis - description`
+- PR to the appropriate category section (alphabetical order)
 
 ---
 
