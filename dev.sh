@@ -517,7 +517,7 @@ _claude_code_has_entry() {
 _install_claude_code_target() {
     # Wire taskchampion-MCP into Claude Code via `claude mcp add`.
     # Uses the dev .venv Python so iteration against the local checkout works
-    # without re-publishing. For fresh remote boxes (e.g. Wintermute) prefer the
+    # without re-publishing. For fresh remote boxes prefer the
     # `scripts/setup_remote.sh` bootstrap which uses a git-pinned `uv tool install`.
     local scope="${1:-user}"
 

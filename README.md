@@ -161,7 +161,7 @@ We focus on the modern Taskwarrior 3.x + TaskChampion stack. Taskserver (taskd) 
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to contribute (branching, PRs, versioning) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Feature roadmap (v0.1.0 → v1.0.0) |
 | [`schemas/`](schemas/) | Task schema presets (TOML) |
-| [`scripts/setup_remote.sh`](scripts/setup_remote.sh) | One-shot remote-host bootstrap (Wintermute and friends) |
+| [`scripts/setup_remote.sh`](scripts/setup_remote.sh) | One-shot remote-host bootstrap |
 
 ---
 
