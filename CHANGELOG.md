@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 First stable release. Ships the four primary stdio targets (Claude Desktop, Windsurf, Cursor, Neovim via Claude Code CLI) with a 26-scenario per-target acceptance matrix. HTTP/SSE transport and ChatGPT/Codex targets are deferred to v1.x.
 
+**Published:** PyPI `taskchampion-mcp==1.0.0`, MCP Registry `io.github.GabiUp2/taskchampion-mcp`, git tag [`v1.0.0`](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0). Pre-release: `v1.0.0-rc1` / `1.0.0rc1`. Release notes: [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md).
+
 ### Added
 
 - **ADR 19 — Runtime reload.** All MCP tools are registered unconditionally at startup; operational tools are gated at runtime by initialisation state and role. Config changes via MCP tools (`set_active_schema`, `set_taxonomy_path`, `set_role`, `use_preset_schema`, `save_initial_schema`) trigger in-process reload — no IDE restart needed. New `reload_configuration` tool for explicit reload after hand-editing `config.toml`.
