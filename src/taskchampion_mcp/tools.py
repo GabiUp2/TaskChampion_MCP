@@ -44,6 +44,7 @@ _ERROR_CODES = {
     "rate_limit",
     "cli_error",
     "schema_unset",
+    "role_insufficient",
     "confirmation_required",
     "dry_run",
     "internal_error",
@@ -135,7 +136,11 @@ def _timed_call(fn, *args, **kwargs):
 
 
 class ToolRegistry:
-    """Holds references to shared state and provides MCP tool implementations."""
+    """Holds references to shared state and provides MCP tool implementations.
+
+    All mutable runtime state lives here so that ``reload()`` can refresh it
+    in-place without re-registering tools (ADR 19).
+    """
 
     def __init__(
         self,
@@ -145,6 +150,7 @@ class ToolRegistry:
         schema: TaskSchema,
         rate_limiter: RateLimiter,
         audit: AuditLogger,
+        config_path: Any | None = None,
     ) -> None:
         self.config = config
         self.task = task_cli
@@ -152,6 +158,68 @@ class ToolRegistry:
         self.schema = schema
         self.limiter = rate_limiter
         self.audit = audit
+        self._config_path = config_path
+
+    @property
+    def initialized(self) -> bool:
+        """True when both role and schema are explicitly configured."""
+        return bool(
+            self.config.explicit_role_configured and self.config.explicit_schema_configured
+        )
+
+    def reload(self) -> list[str]:
+        """Re-read config from disk and refresh all internal state (ADR 19).
+
+        Returns the list of subsystems that were successfully reloaded.
+        Failures are logged but do not prevent other subsystems from reloading.
+        """
+        import logging
+
+        from taskchampion_mcp.config import load_config
+        from taskchampion_mcp.schema import load_schema
+
+        _logger = logging.getLogger("taskchampion_mcp")
+        reloaded: list[str] = []
+
+        new_config = load_config(self._config_path)
+        self.config = new_config
+        reloaded.append("config")
+
+        try:
+            if new_config.schema_path:
+                self.schema = load_schema(new_config.schema_path)
+            else:
+                self.schema = load_schema(new_config.schema_name)
+            reloaded.append("schema")
+        except Exception as exc:
+            _logger.warning("Schema reload failed (keeping previous): %s", exc)
+
+        self.limiter = RateLimiter(
+            ops_per_minute=new_config.rate_limit_per_minute,
+            ops_per_hour=new_config.rate_limit_per_hour,
+            creates_per_hour=new_config.create_limit_per_hour,
+        )
+        reloaded.append("rate_limiter")
+
+        from taskchampion_mcp.audit import AuditLogger as _AuditLogger
+
+        self.audit = _AuditLogger(
+            new_config.audit_log_path,
+            redacted_fields=new_config.redacted_fields,
+        )
+        reloaded.append("audit")
+
+        self.task = TaskwarriorCLI(
+            binary=new_config.task_binary,
+            override_rc=new_config.taskwarrior_override_rc,
+        )
+        reloaded.append("task_cli")
+
+        timew_instance = TimewarriorCLI(binary=new_config.timew_binary)
+        self.timew = timew_instance if timew_instance.available() else None
+        reloaded.append("timew_cli")
+
+        return reloaded
 
     def _guard_rate(self, *, is_create: bool = False) -> None:
         self.limiter.check_and_record(is_create=is_create)

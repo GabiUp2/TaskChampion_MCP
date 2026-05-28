@@ -3,19 +3,24 @@
 # See docs/adrs/ADRs.md for rationale behind each setting.
 
 [server]
-# Role determines which MCP tools are available to the LLM.
-# CONTRIBUTOR — read, annotate, modify existing tasks
+# Role determines which MCP tools are callable at runtime (ADR 5, ADR 19).
+# All tools always appear in tools/list; gating happens per-call.
+# CONTRIBUTOR — read, annotate, modify existing tasks + reconfigure tools
 # GENERATOR   — + create new tasks
 # MANAGER     — + complete, delete, undo_last_action, sync_tasks
+# Change at runtime via MCP: set_role (downgrade only, ADR 17).
+# Raise via hand-edit + reload_configuration.
 role = "CONTRIBUTOR"
 
 # Schema preset name (from schemas/ directory) or path to a custom .toml file.
+# Change at runtime via MCP: set_active_schema (auto-reloads, ADR 19).
 schema = "minimal"
 # schema_path = "/path/to/custom_schema.toml"
 
 # Path to a taxonomy markdown file describing field semantics, lifecycle
 # phases, and conditional requirements. Used by schema auto-generation
-# (IDEA-003) to enrich the generated schema with descriptions and rules.
+# to enrich the generated schema with descriptions and rules.
+# Change at runtime via MCP: set_taxonomy_path (auto-reloads, ADR 19).
 # taxonomy_path = "/path/to/TAXONOMY.md"
 
 # Path to the Taskwarrior binary (default: "task")

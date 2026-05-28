@@ -353,6 +353,7 @@ The original v0.4.0 scope, deferred wholesale because v1.0 covers the targets we
 ### Other deferred targets
 
 - [ ] VS Code (Copilot MCP) — stdio target, but v1.0 scope narrowed to the four primary; bring online once those four are locked
+- [ ] OpenCode — validate MCP integration path and document setup/acceptance tests ([opencode.ai](https://opencode.ai/))
 
 ### Deferred ADR 21 mechanisms
 

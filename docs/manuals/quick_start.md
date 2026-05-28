@@ -14,7 +14,7 @@ That's it. Everything else has sensible defaults.
 
 ---
 
-## TL;DR — three lines + one restart
+## TL;DR — three lines, no restart
 
 ```bash
 mkdir -p ~/.config/taskchampion-mcp
@@ -25,7 +25,10 @@ schema = "minimal"
 EOF
 ```
 
-Restart your IDE (so the MCP server reloads `config.toml`). Done.
+If you completed onboarding via the MCP tools (`use_preset_schema` or
+`save_initial_schema`), the server reloads automatically — no restart needed
+(ADR 19). If you hand-edited the file, call `reload_configuration` from the
+LLM to pick up changes immediately.
 
 If you want to verify before restarting:
 
@@ -41,6 +44,29 @@ print('requires_onboarding:', not (c.explicit_role_configured and c.explicit_sch
 ```
 
 You want `requires_onboarding: False`.
+
+---
+
+## Recommended first call: `get_runtime_capabilities`
+
+When connecting to the TaskChampion MCP server, the LLM should call
+`get_runtime_capabilities` as its **first tool invocation**. The response
+tells it:
+
+- **`mode`**: `"onboarding"` or `"operational"` — whether the server is
+  initialised.
+- **`role`**: the current role (`CONTRIBUTOR`, `GENERATOR`, `MANAGER`) or
+  `null` if not initialised.
+- **`schema`**: the loaded schema name/version, or `null`.
+- **`integrations`**: which optional integrations are available (e.g.
+  Timewarrior).
+- **`callable_tool_groups`** / **`uncallable_tool_groups`**: which tool
+  groups are usable right now and which are gated (with `uncallable_reason`
+  codes like `schema_unset` or `role_insufficient`).
+
+This single call replaces trial-and-error probing of the tool surface. The
+LLM can route to onboarding tools or to the operational tools based on the
+`mode` field, and knows exactly which tool groups to avoid.
 
 ---
 
@@ -151,13 +177,14 @@ If the tool surface still looks like onboarding tools (`get_initialization_statu
 
 Two routes:
 
-1. **From the LLM (no shell needed):** use the post-onboarding reconfigure
-   tools — `set_active_schema(...)`, `set_taxonomy_path(...)`,
-   `set_role(...)`. The role tool will refuse to raise your role above the
-   currently-loaded value (ADR 17). After the call, restart the IDE so the
-   new config is loaded.
-2. **By hand:** edit this file again, restart the IDE. The role-raise
-   restriction does not apply to direct file edits — you own the file.
+1. **From the LLM (no shell needed):** use the reconfigure tools —
+   `set_active_schema(...)`, `set_taxonomy_path(...)`, `set_role(...)`.
+   These write `config.toml` and auto-reload the server in-process, so
+   changes take effect immediately (ADR 19). The role tool will refuse to
+   raise your role above the currently-loaded value (ADR 17).
+2. **By hand:** edit `config.toml`, then call `reload_configuration` from
+   the LLM — or restart the IDE. The role-raise restriction does not apply
+   to direct file edits — you own the file.
 
 ---
 
@@ -165,7 +192,7 @@ Two routes:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Tool surface shows `get_initialization_status` etc. after restart | `role` or `schema` missing | Add both to `[server]` and restart |
+| Tools return `schema_unset` errors | `role` or `schema` missing from config | Add both to `[server]` and call `reload_configuration` (or restart) |
 | `Schema 'minimal' loaded` but you picked `gtd` | Config file in wrong location | Confirm path is `~/.config/taskchampion-mcp/config.toml` |
 | `set_role` returns `role_elevation_forbidden` | You tried to upgrade via MCP | Hand-edit this file (ADR 17) |
 | MCP server crashes on startup, `Taskwarrior not found` | `task` binary not on `PATH` | Install Taskwarrior 3.x or set `task_binary` |

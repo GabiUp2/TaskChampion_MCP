@@ -4,7 +4,7 @@
 
 [project]
 name = "taskchampion-mcp"
-version = "0.3.0"
+version = "1.0.0"
 description = "Model Context Protocol server for Taskwarrior 3.x, TaskChampion, and Timewarrior"
 readme = "README.md"
 license = "Apache-2.0"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["mcp", "taskwarrior", "taskchampion", "timewarrior", "llm", "model-context-protocol"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -63,6 +63,7 @@ pythonpath = ["src"]
 markers = [
     "integration: tests that require real external binaries and ephemeral data",
     "security: security regression corpus tests",
+    "acceptance: Phase 3 target-agnostic acceptance suite (26 scenarios)",
 ]
 
 [tool.ruff]

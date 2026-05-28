@@ -811,6 +811,30 @@ Versions 0.x.y leading up to v1.0 follow normal SemVer with the relaxed conventi
 - Tool-renaming breaking changes must be coordinated into a single MAJOR boundary
 - Auth model for HTTP/SSE is its own design problem (likely future ADR)
 
+### Addendum — 2026-05-28: v1.0 scope narrowed to four stdio targets
+
+**Status change:** Proposed -> Accepted (with scope amendment)
+
+The original ADR 15 defined v1.0 as requiring both transports (stdio + HTTP/SSE) and all seven targets. Development experience through v0.3.x demonstrated that the four primary stdio targets (Claude Desktop, Windsurf, Cursor, Neovim via Claude Code CLI) cover 100% of current users. HTTP/SSE transport and the targets that depend on it (ChatGPT, Codex) are deferred to v1.x minor releases.
+
+**Amended v1.0 release gates** (replacing the original gates 1-3):
+
+1. **stdio transport only**: four targets pass the 26-scenario acceptance matrix (ADR 12 layer 3). HTTP/SSE deferred to v1.x.
+2. **All four targets acceptance-tested**: headless automation for Windsurf, Cursor, Neovim; manual checklist + transcript for Claude Desktop.
+3. **Auth story deferred**: token-based auth ships with HTTP/SSE in v1.x; stdio is process-bound and requires no transport-level auth.
+
+Gates 4-10 from the original ADR 15 remain unchanged and are met:
+
+- Tool surface normalised (gate 4)
+- Error model implemented with ADR 14 codes (gate 5)
+- Config precedence per ADR 16 with `--config-dump` (gate 6)
+- Distribution via PyPI and MCP Registry (gate 7)
+- Security baseline verified per ADR 9 (gate 8)
+- Per-target docs, config reference, schema guide, security model (gate 9)
+- CHANGELOG spans 0.x -> 1.0 (gate 10)
+
+Cross-references: ADR 3, ADR 12, ADR 19, ADR 21a, ADR 21c (deferred with HTTP/SSE).
+
 ---
 
 # ADR 16: Configuration Precedence — Five Layers, Last Wins, Explicit Provenance
@@ -1173,6 +1197,20 @@ A v0.3.x or v0.4.x patch closing this ADR is considered done when:
 - ADR 17 — Role-elevation asymmetry (reload does not weaken this; runtime checks still refuse elevation)
 - `docs/llm_context/mcp_runtime_reload_pattern.md` — the original IDE-agent handoff doc this ADR formalises. Will be marked superseded once implementation lands.
 
+## Addendum — 2026-05-28: Accepted
+
+**Status change:** Proposed → **Accepted**
+
+Implementation shipped in v0.4.0 (commit series from this session). All five acceptance criteria are met:
+
+1. `tools/list` returns the same 33-tool set in both onboarding and post-onboarding configurations — smoke tests collapsed.
+2. `use_preset_schema` + immediate `get_schema_info` returns the new schema without restart — auto-reload wired into onboarding write tools.
+3. `reload_configuration` registered at CONTRIBUTOR level — re-reads config, schema, rate limiter, audit logger, CLI wrappers.
+4. Role refusals carry `code: "role_insufficient"` per ADR 14.
+5. `tests/test_runtime_reload.py` covers stale state, post-onboarding visibility, explicit reload, role gating, and Timewarrior-absent fallback.
+
+Additionally, ADR 21a's `get_runtime_capabilities` tool shipped alongside, providing structured introspection of the gated surface.
+
 ---
 
 # ADR 20: Remote-Host Bootstrap — `scripts/setup_remote.sh`
@@ -1357,6 +1395,12 @@ A patch implementing this ADR is complete when:
 - ADR 17 — Role-elevation asymmetry (the role surfaced here is the *currently loaded* role; mutations remain governed by `set_role` semantics)
 - ADR 19 — Runtime reload (this tool reflects the reloaded state if/when reload lands)
 - ADR 21 — Original umbrella entry that decomposed into 21a/21b/21c
+
+## Addendum — 2026-05-28: Accepted
+
+**Status change:** Proposed → **Accepted**
+
+Implemented alongside ADR 19 in v0.4.0. The `get_runtime_capabilities` tool ships with the following shape: `mode` (onboarding/operational), `role`, `schema`, `integrations`, `callable_tool_groups`, `uncallable_tool_groups` with per-group `uncallable_reason` codes. Routed through `_audit_call`. Tests in `tests/test_runtime_reload.py` cover onboarding, contributor, and manager modes.
 
 ---
 

@@ -27,9 +27,12 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Tool-surface expectations per scenario
+#
+# ADR 19: ALL tools register unconditionally at startup.  Both scenarios
+# see the same tools/list; the difference is runtime behaviour (per-tool
+# gates return structured errors when the tool is not callable).
 # ---------------------------------------------------------------------------
 
-# Onboarding tools — registered when config.toml is empty / missing
 EXPECTED_ONBOARDING_TOOLS = {
     "get_initialization_status",
     "propose_initialization_options",
@@ -41,7 +44,6 @@ EXPECTED_ONBOARDING_TOOLS = {
     "analyze_taxonomy_file",
 }
 
-# Contributor tools — registered after onboarding completes
 EXPECTED_CONTRIBUTOR_TOOLS = {
     "list_tasks",
     "get_task",
@@ -55,29 +57,58 @@ EXPECTED_CONTRIBUTOR_TOOLS = {
     "get_active_context",
     "get_schema_info",
     "get_task_report",
+    "get_time_summary",
+    "get_time_status",
 }
 
-# Reconfigure tools — registered alongside CONTRIBUTOR tools (ADR 17 surface)
 EXPECTED_RECONFIGURE_TOOLS = {
     "set_active_schema",
     "set_taxonomy_path",
     "set_role",
 }
 
-# Per-scenario required-tool sets and exclusions
+EXPECTED_GENERATOR_TOOLS = {
+    "create_task",
+    "create_subtask",
+    "batch_create_tasks",
+}
+
+EXPECTED_MANAGER_TOOLS = {
+    "complete_task",
+    "delete_task",
+    "undo_last_action",
+    "sync_tasks",
+    "bulk_modify",
+}
+
+EXPECTED_INTROSPECTION_TOOLS = {
+    "reload_configuration",
+    "get_runtime_capabilities",
+}
+
+# The full stable surface — identical in both scenarios per ADR 19
+ALL_EXPECTED_TOOLS = (
+    EXPECTED_ONBOARDING_TOOLS
+    | EXPECTED_CONTRIBUTOR_TOOLS
+    | EXPECTED_RECONFIGURE_TOOLS
+    | EXPECTED_GENERATOR_TOOLS
+    | EXPECTED_MANAGER_TOOLS
+    | EXPECTED_INTROSPECTION_TOOLS
+)
+
 SCENARIOS = {
     "onboarding": {
-        "must_have": EXPECTED_ONBOARDING_TOOLS,
-        "must_not_have": EXPECTED_CONTRIBUTOR_TOOLS | EXPECTED_RECONFIGURE_TOOLS,
+        "must_have": ALL_EXPECTED_TOOLS,
+        "must_not_have": set(),
     },
     "post_onboarding": {
-        "must_have": EXPECTED_CONTRIBUTOR_TOOLS | EXPECTED_RECONFIGURE_TOOLS,
-        "must_not_have": EXPECTED_ONBOARDING_TOOLS,
+        "must_have": ALL_EXPECTED_TOOLS,
+        "must_not_have": set(),
     },
 }
 
 # Back-compat alias kept while the test harness migrates to scenario names.
-MINIMUM_REQUIRED_TOOLS = EXPECTED_ONBOARDING_TOOLS
+MINIMUM_REQUIRED_TOOLS = ALL_EXPECTED_TOOLS
 
 
 def _send(proc: subprocess.Popen, msg: dict) -> None:

@@ -126,7 +126,13 @@ def create_server(
     config: ServerConfig | None = None,
     config_path: Path | None = None,
 ) -> FastMCP:
-    """Build and configure the MCP server with role-appropriate tools."""
+    """Build and configure the MCP server with the full tool surface.
+
+    Per ADR 19, ALL tools register unconditionally at startup.  Runtime
+    gates inside each handler check initialisation state and role level
+    before executing, returning structured ADR-14 error envelopes when
+    the tool is not currently callable.
+    """
 
     if config is None:
         config = load_config(config_path)
@@ -166,10 +172,6 @@ def create_server(
     else:
         logger.info("Timewarrior not found. Time tracking tools disabled.")
 
-    # --- Init required ------------------------------------------------------
-    def requires_onboarding(config: ServerConfig) -> bool:
-        return not (config.explicit_role_configured and config.explicit_schema_configured)
-
     # --- Load schema --------------------------------------------------------
     schema: TaskSchema
     if config.schema_path:
@@ -198,8 +200,8 @@ def create_server(
         schema=schema,
         rate_limiter=rate_limiter,
         audit=audit,
+        config_path=config_path,
     )
-    onboarding_required = requires_onboarding(config)
 
     # --- Create FastMCP server ----------------------------------------------
     mcp = FastMCP(
@@ -208,30 +210,63 @@ def create_server(
             config,
             schema,
             tw_version,
-            onboarding_required=onboarding_required,
+            onboarding_required=not registry.initialized,
         ),
     )
 
-    # --- Register tools by role level ---------------------------------------
-    if onboarding_required:
-        _register_onboarding_tools(mcp, registry)
-    else:
-        _register_contributor_tools(mcp, registry)
-
-        if Role.has_permission(config.role, Role.GENERATOR):
-            _register_generator_tools(mcp, registry)
-
-        if Role.has_permission(config.role, Role.MANAGER):
-            _register_manager_tools(mcp, registry)
+    # --- Register ALL tools unconditionally (ADR 19) ------------------------
+    _register_onboarding_tools(mcp, registry)
+    _register_contributor_tools(mcp, registry)
+    _register_generator_tools(mcp, registry)
+    _register_manager_tools(mcp, registry)
+    _register_reload_tool(mcp, registry)
 
     logger.info(
-        "Server ready. Role=%s, Schema=%s, TW=%s",
+        "Server ready. Role=%s, Schema=%s, TW=%s, Initialized=%s",
         config.role,
         schema.name,
         tw_version,
+        registry.initialized,
     )
 
     return mcp
+
+
+# ---------------------------------------------------------------------------
+# Runtime gates (ADR 19)
+# ---------------------------------------------------------------------------
+
+
+def _gate_initialized(reg: ToolRegistry) -> str | None:
+    """Return a JSON error string if the server is not initialised, else None."""
+    if reg.initialized:
+        return None
+    return json.dumps({
+        "error": True,
+        "code": "schema_unset",
+        "message": (
+            "Server is not initialised. Complete onboarding first: call "
+            "get_initialization_status, then save_initial_schema or "
+            "use_preset_schema to persist a schema and role."
+        ),
+    })
+
+
+def _gate_role(reg: ToolRegistry, required_role: str) -> str | None:
+    """Return a JSON error string if init or role is insufficient, else None."""
+    init_err = _gate_initialized(reg)
+    if init_err:
+        return init_err
+    if not Role.has_permission(reg.config.role, required_role):
+        return json.dumps({
+            "error": True,
+            "code": "role_insufficient",
+            "message": (
+                f"This tool requires role {required_role} or higher; "
+                f"current role is {reg.config.role}."
+            ),
+        })
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -526,21 +561,23 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "overwrite": overwrite,
             "update_config": update_config,
         }
-        return json.dumps(
-            _audit_call(
-                reg,
-                "save_initial_schema",
-                params,
-                lambda: onboarding_save_initial_schema(
-                    schema_toml=schema_toml,
-                    taxonomy_path=taxonomy_path or None,
-                    output_path=output_path or None,
-                    role=role or None,
-                    overwrite=overwrite,
-                    update_config=update_config,
-                ),
-            )
+        result = _audit_call(
+            reg,
+            "save_initial_schema",
+            params,
+            lambda: onboarding_save_initial_schema(
+                schema_toml=schema_toml,
+                taxonomy_path=taxonomy_path or None,
+                output_path=output_path or None,
+                role=role or None,
+                overwrite=overwrite,
+                update_config=update_config,
+            ),
         )
+        if isinstance(result, dict) and result.get("success"):
+            reg.reload()
+            result["restart_required"] = False
+        return json.dumps(result)
 
     @mcp.tool()
     def list_preset_schemas() -> str:
@@ -596,26 +633,32 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             "overwrite": overwrite,
             "update_config": update_config,
         }
-        return json.dumps(
-            _audit_call(
-                reg,
-                "use_preset_schema",
-                params,
-                lambda: onboarding_use_preset_schema(
-                    preset_name=preset_name,
-                    taxonomy_path=taxonomy_path or None,
-                    output_path=output_path or None,
-                    role=role or None,
-                    copy=copy,
-                    overwrite=overwrite,
-                    update_config=update_config,
-                ),
-            )
+        result = _audit_call(
+            reg,
+            "use_preset_schema",
+            params,
+            lambda: onboarding_use_preset_schema(
+                preset_name=preset_name,
+                taxonomy_path=taxonomy_path or None,
+                output_path=output_path or None,
+                role=role or None,
+                copy=copy,
+                overwrite=overwrite,
+                update_config=update_config,
+            ),
         )
+        if isinstance(result, dict) and result.get("success"):
+            reg.reload()
+            result["restart_required"] = False
+        return json.dumps(result)
 
 
 def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
-    """Register CONTRIBUTOR-level tools (read + annotate + modify)."""
+    """Register CONTRIBUTOR-level tools (read + annotate + modify).
+
+    Per ADR 19, tools are always registered; runtime gates check
+    initialisation and role before executing.
+    """
 
     @mcp.tool()
     def list_tasks(
@@ -630,6 +673,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         - '+python' — tasks tagged 'python'
         Combine filters: 'status:pending project:work phase:impl'
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.list_tasks(filters))
 
     @mcp.tool()
@@ -639,6 +685,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Returns full task details including all fields and annotations.
         Always use UUID (not local ID) for reliable identification.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_task(uuid))
 
     @mcp.tool()
@@ -653,6 +702,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
             field: Field to search in. Options: 'description',
                    'project', 'tags', or any UDA name.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.search_tasks(query, field))
 
     @mcp.tool()
@@ -662,6 +714,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Annotations are the preferred way to add narrative context,
         rationale, and reference links to tasks.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.annotate_task(uuid, annotation, dry_run))
 
     @mcp.tool()
@@ -679,6 +734,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                     For adding tags: {"tags_add": ["python"]}
                     For removing tags: {"tags_remove": ["old"]}
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.modify_task(uuid, fields, dry_run))
 
     @mcp.tool()
@@ -688,6 +746,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         If Timewarrior hook is installed, this also starts
         time tracking with the task's tags.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.start_task(uuid, dry_run))
 
     @mcp.tool()
@@ -697,21 +758,33 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         If Timewarrior hook is installed, this also stops
         time tracking for the task.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.stop_task(uuid, dry_run))
 
     @mcp.tool()
     def get_projects() -> str:
         """List all project names in the Taskwarrior database."""
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_projects())
 
     @mcp.tool()
     def get_tags() -> str:
         """List all tags used in the Taskwarrior database."""
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_tags())
 
     @mcp.tool()
     def get_active_context() -> str:
         """Show the currently active Taskwarrior context filter."""
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_active_context())
 
     @mcp.tool()
@@ -722,6 +795,9 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         and conditional requirements. Use this to understand what
         fields are available before creating or modifying tasks.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_schema_info())
 
     @mcp.tool()
@@ -732,24 +808,31 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         - report_name='next'
         - report_name='blocked', filters='project:work'
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         return json.dumps(reg.get_task_report(report_name, filters))
 
-    if reg.timew:
+    @mcp.tool()
+    def get_time_summary(period: str = ":day") -> str:
+        """Get Timewarrior time tracking summary.
 
-        @mcp.tool()
-        def get_time_summary(period: str = ":day") -> str:
-            """Get Timewarrior time tracking summary.
+        Args:
+            period: Time period — ':day', ':week', ':month',
+                    or a date range like '2026-05-01 - 2026-05-25'.
+        """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
+        return json.dumps(reg.timew_summary(period))
 
-            Args:
-                period: Time period — ':day', ':week', ':month',
-                        or a date range like '2026-05-01 - 2026-05-25'.
-            """
-            return json.dumps(reg.timew_summary(period))
-
-        @mcp.tool()
-        def get_time_status() -> str:
-            """Check if Timewarrior is currently tracking time."""
-            return json.dumps(reg.timew_status())
+    @mcp.tool()
+    def get_time_status() -> str:
+        """Check if Timewarrior is currently tracking time."""
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
+        return json.dumps(reg.timew_status())
 
     # -----------------------------------------------------------------------
     # Post-onboarding reconfiguration (ADR 17)
@@ -782,29 +865,34 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         confirming a preset name spells correctly or a schema_path
         exists before committing. Returns code="dry_run" per ADR 14.
 
-        Updates config.toml; takes effect on next MCP server restart
-        (runtime reload is not yet implemented). Does not mutate any
+        Updates config.toml and triggers an in-process reload so the
+        change takes effect immediately (ADR 19). Does not mutate any
         Taskwarrior tasks. Available at CONTRIBUTOR level and above —
         switching the validation lens is a horizontal move, not a
         privilege change (ADR 17).
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         params = {
             "schema_name": schema_name or None,
             "schema_path": schema_path or None,
             "dry_run": dry_run,
         }
-        return json.dumps(
-            _audit_call(
-                reg,
-                "set_active_schema",
-                params,
-                lambda: onboarding_reconfigure_active_schema(
-                    schema_name=schema_name or None,
-                    schema_path=schema_path or None,
-                    dry_run=dry_run,
-                ),
-            )
+        result = _audit_call(
+            reg,
+            "set_active_schema",
+            params,
+            lambda: onboarding_reconfigure_active_schema(
+                schema_name=schema_name or None,
+                schema_path=schema_path or None,
+                dry_run=dry_run,
+            ),
         )
+        if not dry_run and isinstance(result, dict) and result.get("success"):
+            reg.reload()
+            result["restart_required"] = False
+        return json.dumps(result)
 
     @mcp.tool()
     def set_taxonomy_path(path: str, dry_run: bool = False) -> str:
@@ -822,14 +910,19 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Takes effect on next MCP server restart. Available at
         CONTRIBUTOR level (informational input, not a capability).
         """
-        return json.dumps(
-            _audit_call(
-                reg,
-                "set_taxonomy_path",
-                {"path": path, "dry_run": dry_run},
-                lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
-            )
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
+        result = _audit_call(
+            reg,
+            "set_taxonomy_path",
+            {"path": path, "dry_run": dry_run},
+            lambda: onboarding_reconfigure_taxonomy_path(path, dry_run=dry_run),
         )
+        if not dry_run and isinstance(result, dict) and result.get("success"):
+            reg.reload()
+            result["restart_required"] = False
+        return json.dumps(result)
 
     @mcp.tool()
     def set_role(target_role: str, dry_run: bool = False) -> str:
@@ -856,27 +949,35 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Takes effect on next MCP server restart.
         """
+        gate = _gate_initialized(reg)
+        if gate:
+            return gate
         params = {
             "target_role": target_role,
             "current_role": reg.config.role,
             "dry_run": dry_run,
         }
-        return json.dumps(
-            _audit_call(
-                reg,
-                "set_role",
-                params,
-                lambda: onboarding_reconfigure_role(
-                    current_role=reg.config.role,
-                    target_role=target_role,
-                    dry_run=dry_run,
-                ),
-            )
+        result = _audit_call(
+            reg,
+            "set_role",
+            params,
+            lambda: onboarding_reconfigure_role(
+                current_role=reg.config.role,
+                target_role=target_role,
+                dry_run=dry_run,
+            ),
         )
+        if not dry_run and isinstance(result, dict) and result.get("success"):
+            reg.reload()
+            result["restart_required"] = False
+        return json.dumps(result)
 
 
 def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
-    """Register GENERATOR-level tools (create)."""
+    """Register GENERATOR-level tools (create).
+
+    Per ADR 19, always registered; runtime gate checks GENERATOR role.
+    """
 
     @mcp.tool()
     def create_task(
@@ -901,6 +1002,9 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Call get_schema_info first to see required and available fields.
         """
+        gate = _gate_role(reg, Role.GENERATOR)
+        if gate:
+            return gate
         tag_list = [t.strip() for t in tags if t and t.strip()] if tags else None
         udas: dict[str, str] = dict(extra_fields or {})
         return json.dumps(
@@ -941,6 +1045,9 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         The subtask will have a 'depends' field set to the parent UUID.
         Call get_schema_info first to see required and available fields.
         """
+        gate = _gate_role(reg, Role.GENERATOR)
+        if gate:
+            return gate
         tag_list = [t.strip() for t in tags if t and t.strip()] if tags else None
         udas: dict[str, str] = dict(extra_fields or {})
         return json.dumps(
@@ -966,11 +1073,17 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Each entry supports the same shape as create_task:
         description, project, priority, tags, due, extra_fields.
         """
+        gate = _gate_role(reg, Role.GENERATOR)
+        if gate:
+            return gate
         return json.dumps(reg.batch_create_tasks(tasks=tasks, dry_run=dry_run))
 
 
 def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
-    """Register MANAGER-level tools (lifecycle control)."""
+    """Register MANAGER-level tools (lifecycle control).
+
+    Per ADR 19, always registered; runtime gate checks MANAGER role.
+    """
 
     @mcp.tool()
     def complete_task(
@@ -987,6 +1100,9 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Destructive operation — may require confirmation depending
         on server configuration.
         """
+        gate = _gate_role(reg, Role.MANAGER)
+        if gate:
+            return gate
         return json.dumps(reg.complete_task(uuid, dry_run, confirm_token))
 
     @mcp.tool()
@@ -1004,6 +1120,9 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         Destructive operation — may require confirmation depending
         on server configuration. Prefer completing over deleting.
         """
+        gate = _gate_role(reg, Role.MANAGER)
+        if gate:
+            return gate
         return json.dumps(reg.delete_task(uuid, dry_run, confirm_token))
 
     @mcp.tool()
@@ -1012,6 +1131,9 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Reverts the most recent change. Use with caution.
         """
+        gate = _gate_role(reg, Role.MANAGER)
+        if gate:
+            return gate
         return json.dumps(reg.undo(dry_run=dry_run, confirm_token=confirm_token))
 
     @mcp.tool()
@@ -1020,6 +1142,9 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Pushes local changes and pulls remote changes.
         """
+        gate = _gate_role(reg, Role.MANAGER)
+        if gate:
+            return gate
         return json.dumps(reg.sync(dry_run=dry_run))
 
     @mcp.tool()
@@ -1033,6 +1158,9 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
         Supports dry-run previews and confirmation for high-impact changes.
         """
+        gate = _gate_role(reg, Role.MANAGER)
+        if gate:
+            return gate
         return json.dumps(
             reg.bulk_modify(
                 filters=filters,
@@ -1041,6 +1169,187 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
                 confirm_token=confirm_token,
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Runtime reload + capability introspection (ADR 19 / ADR 21a)
+# ---------------------------------------------------------------------------
+
+
+def _register_reload_tool(mcp: FastMCP, reg: ToolRegistry) -> None:
+    """Register the reload_configuration and get_runtime_capabilities tools."""
+
+    @mcp.tool()
+    def reload_configuration() -> str:
+        """Re-read config.toml from disk and refresh all runtime state.
+
+        Use this after hand-editing config.toml to pick up changes without
+        restarting the IDE.  Reloads: config, schema, rate limiter, audit
+        logger, Taskwarrior/Timewarrior CLI wrappers.
+
+        Onboarding write tools (save_initial_schema, use_preset_schema) and
+        reconfigure tools (set_active_schema, set_taxonomy_path, set_role)
+        auto-reload on success, so you rarely need to call this directly.
+        """
+        params: dict[str, Any] = {}
+        return json.dumps(
+            _audit_call(
+                reg,
+                "reload_configuration",
+                params,
+                lambda: _do_reload(reg),
+            )
+        )
+
+    @mcp.tool()
+    def get_runtime_capabilities() -> str:
+        """Return the server's current mode, role, schema, and callable tool groups.
+
+        Call this first to understand what the server can do right now.
+        The response tells you which tool groups are callable and which
+        are blocked (with the reason code).
+        """
+        params: dict[str, Any] = {}
+        return json.dumps(
+            _audit_call(
+                reg,
+                "get_runtime_capabilities",
+                params,
+                lambda: _build_capabilities(reg),
+            )
+        )
+
+
+def _do_reload(reg: ToolRegistry) -> dict[str, Any]:
+    """Execute the reload and return a structured result."""
+    reloaded = reg.reload()
+    return {
+        "success": True,
+        "code": "ok",
+        "reloaded": reloaded,
+        "restart_required": False,
+        "initialized": reg.initialized,
+        "role": reg.config.role,
+        "schema_name": reg.schema.name,
+        "message": f"Configuration reloaded ({len(reloaded)} subsystems refreshed).",
+    }
+
+
+def _build_capabilities(reg: ToolRegistry) -> dict[str, Any]:
+    """Build the ADR 21a runtime capabilities payload."""
+    mode = "operational" if reg.initialized else "onboarding"
+    role = reg.config.role if reg.initialized else None
+
+    callable_groups: list[dict[str, Any]] = []
+    uncallable_groups: list[dict[str, Any]] = []
+
+    # Onboarding tools are always callable
+    callable_groups.append({
+        "group": "onboarding",
+        "tools": [
+            "get_initialization_status",
+            "propose_initialization_options",
+            "analyze_existing_tasks_for_schema",
+            "analyze_taxonomy_file",
+            "generate_initial_schema_preview",
+            "save_initial_schema",
+            "list_preset_schemas",
+            "use_preset_schema",
+        ],
+    })
+
+    # Introspection tools are always callable
+    callable_groups.append({
+        "group": "introspection",
+        "tools": ["reload_configuration", "get_runtime_capabilities"],
+    })
+
+    if reg.initialized:
+        callable_groups.append({
+            "group": "contributor",
+            "tools": [
+                "list_tasks", "get_task", "search_tasks", "annotate_task",
+                "modify_task", "start_task", "stop_task", "get_projects",
+                "get_tags", "get_active_context", "get_schema_info",
+                "get_task_report", "get_time_summary", "get_time_status",
+            ],
+        })
+        callable_groups.append({
+            "group": "reconfigure",
+            "tools": ["set_active_schema", "set_taxonomy_path", "set_role"],
+        })
+
+        if Role.has_permission(reg.config.role, Role.GENERATOR):
+            callable_groups.append({
+                "group": "generator",
+                "tools": ["create_task", "create_subtask", "batch_create_tasks"],
+            })
+        else:
+            uncallable_groups.append({
+                "group": "generator",
+                "tools": ["create_task", "create_subtask", "batch_create_tasks"],
+                "uncallable_reason": "role_insufficient",
+                "detail": f"Requires GENERATOR; current role is {reg.config.role}.",
+            })
+
+        if Role.has_permission(reg.config.role, Role.MANAGER):
+            callable_groups.append({
+                "group": "manager",
+                "tools": [
+                    "complete_task", "delete_task", "undo_last_action",
+                    "sync_tasks", "bulk_modify",
+                ],
+            })
+        else:
+            uncallable_groups.append({
+                "group": "manager",
+                "tools": [
+                    "complete_task", "delete_task", "undo_last_action",
+                    "sync_tasks", "bulk_modify",
+                ],
+                "uncallable_reason": "role_insufficient",
+                "detail": f"Requires MANAGER; current role is {reg.config.role}.",
+            })
+    else:
+        for group_name, tools, reason in [
+            ("contributor", [
+                "list_tasks", "get_task", "search_tasks", "annotate_task",
+                "modify_task", "start_task", "stop_task", "get_projects",
+                "get_tags", "get_active_context", "get_schema_info",
+                "get_task_report", "get_time_summary", "get_time_status",
+            ], "schema_unset"),
+            ("reconfigure", [
+                "set_active_schema", "set_taxonomy_path", "set_role",
+            ], "schema_unset"),
+            ("generator", [
+                "create_task", "create_subtask", "batch_create_tasks",
+            ], "schema_unset"),
+            ("manager", [
+                "complete_task", "delete_task", "undo_last_action",
+                "sync_tasks", "bulk_modify",
+            ], "schema_unset"),
+        ]:
+            uncallable_groups.append({
+                "group": group_name,
+                "tools": tools,
+                "uncallable_reason": reason,
+                "detail": "Server is not initialised; complete onboarding first.",
+            })
+
+    return {
+        "success": True,
+        "mode": mode,
+        "role": role,
+        "schema": {
+            "name": reg.schema.name,
+            "version": reg.schema.version,
+        } if reg.initialized else None,
+        "integrations": {
+            "timewarrior": reg.timew is not None,
+        },
+        "callable_tool_groups": callable_groups,
+        "uncallable_tool_groups": uncallable_groups,
+    }
 
 
 # ---------------------------------------------------------------------------

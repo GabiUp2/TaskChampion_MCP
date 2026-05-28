@@ -85,14 +85,14 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
         task=MagicMock(),
         timew=MagicMock(),
         audit=MagicMock(),
-        # _audit_call calls limiter.check_and_record; use a real limiter with
-        # generous bounds so onboarding tools execute normally (rate-limit
-        # behaviour itself is covered in test_observability).
+        initialized=True,
         limiter=RateLimiter(
             ops_per_minute=10_000,
             ops_per_hour=10_000,
             creates_per_hour=10_000,
         ),
+        schema=MagicMock(name="minimal", version="1.0.0"),
+        reload=lambda: ["config", "schema"],
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_get_initialization_status",
@@ -153,6 +153,11 @@ def test_register_onboarding_tools_calls_wrapped_functions(monkeypatch: pytest.M
 
 def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = FakeMCP()
+    cfg = ServerConfig(
+        role=Role.CONTRIBUTOR,
+        explicit_role_configured=True,
+        explicit_schema_configured=True,
+    )
     reg = SimpleNamespace(
         list_tasks=lambda filters="": {"ok": filters},
         get_task=lambda uuid: {"uuid": uuid},
@@ -169,15 +174,15 @@ def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.M
         timew_summary=lambda period=":day": {"period": period},
         timew_status=lambda: {"tracking": False},
         timew=object(),
-        config=ServerConfig(),
+        config=cfg,
+        initialized=True,
         audit=MagicMock(),
-        # _audit_call (used by the reconfigure tools registered alongside
-        # contributor tools) needs limiter.check_and_record.
         limiter=RateLimiter(
             ops_per_minute=10_000,
             ops_per_hour=10_000,
             creates_per_hour=10_000,
         ),
+        reload=lambda: ["config", "schema"],
     )
     monkeypatch.setattr(
         "taskchampion_mcp.server.onboarding_reconfigure_active_schema",
@@ -214,10 +219,17 @@ def test_register_contributor_tools_calls_registry_methods(monkeypatch: pytest.M
 
 def test_register_generator_tools_calls_registry_methods() -> None:
     mcp = FakeMCP()
+    cfg = ServerConfig(
+        role=Role.GENERATOR,
+        explicit_role_configured=True,
+        explicit_schema_configured=True,
+    )
     reg = SimpleNamespace(
         create_task=lambda **kwargs: kwargs,
         create_subtask=lambda **kwargs: kwargs,
         batch_create_tasks=lambda tasks, dry_run=None: {"tasks": tasks, "dry_run": dry_run},
+        config=cfg,
+        initialized=True,
     )
     _register_generator_tools(mcp, reg)
 
@@ -244,6 +256,11 @@ def test_register_generator_tools_calls_registry_methods() -> None:
 
 def test_register_manager_tools_calls_registry_methods() -> None:
     mcp = FakeMCP()
+    cfg = ServerConfig(
+        role=Role.MANAGER,
+        explicit_role_configured=True,
+        explicit_schema_configured=True,
+    )
     reg = SimpleNamespace(
         complete_task=lambda uuid, dry_run=None, confirm_token="": {
             "uuid": uuid,
@@ -261,6 +278,8 @@ def test_register_manager_tools_calls_registry_methods() -> None:
         },
         sync=lambda dry_run=None: {"dry_run": dry_run},
         bulk_modify=lambda **kwargs: kwargs,
+        config=cfg,
+        initialized=True,
     )
     _register_manager_tools(mcp, reg)
 
@@ -272,7 +291,10 @@ def test_register_manager_tools_calls_registry_methods() -> None:
     assert bulk["filters"] == "project:work"
 
 
-def test_create_server_registers_onboarding_when_required(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_server_registers_all_tools_when_uninitialised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 19: ALL tool groups register unconditionally, even before onboarding."""
     cfg = ServerConfig(
         role=Role.CONTRIBUTOR,
         explicit_role_configured=False,
@@ -292,24 +314,37 @@ def test_create_server_registers_onboarding_when_required(monkeypatch: pytest.Mo
     monkeypatch.setattr("taskchampion_mcp.server.RateLimiter", lambda **_kw: MagicMock())
     audit = MagicMock()
     monkeypatch.setattr("taskchampion_mcp.server.AuditLogger", lambda *_a, **_kw: audit)
-    monkeypatch.setattr("taskchampion_mcp.server.ToolRegistry", lambda **_kw: SimpleNamespace())
+    monkeypatch.setattr(
+        "taskchampion_mcp.server.ToolRegistry",
+        lambda **_kw: SimpleNamespace(initialized=False),
+    )
     monkeypatch.setattr("taskchampion_mcp.server.FastMCP", FakeMCP)
 
     onb = MagicMock()
     ctb = MagicMock()
+    gen = MagicMock()
+    man = MagicMock()
+    rld = MagicMock()
     monkeypatch.setattr("taskchampion_mcp.server._register_onboarding_tools", onb)
     monkeypatch.setattr("taskchampion_mcp.server._register_contributor_tools", ctb)
+    monkeypatch.setattr("taskchampion_mcp.server._register_generator_tools", gen)
+    monkeypatch.setattr("taskchampion_mcp.server._register_manager_tools", man)
+    monkeypatch.setattr("taskchampion_mcp.server._register_reload_tool", rld)
     monkeypatch.setattr("taskchampion_mcp.server._build_instructions", lambda *_a, **_kw: "x")
 
     _ = create_server(config=cfg)
     assert onb.called
-    assert not ctb.called
+    assert ctb.called
+    assert gen.called
+    assert man.called
+    assert rld.called
     assert audit.log_startup.called
 
 
-def test_create_server_registers_role_tools_when_initialised(
+def test_create_server_registers_all_tools_when_initialised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """ADR 19: ALL tool groups register unconditionally when initialised too."""
     cfg = ServerConfig(
         role=Role.MANAGER,
         explicit_role_configured=True,
@@ -328,7 +363,10 @@ def test_create_server_registers_role_tools_when_initialised(
     )
     monkeypatch.setattr("taskchampion_mcp.server.RateLimiter", lambda **_kw: MagicMock())
     monkeypatch.setattr("taskchampion_mcp.server.AuditLogger", lambda *_a, **_kw: MagicMock())
-    monkeypatch.setattr("taskchampion_mcp.server.ToolRegistry", lambda **_kw: SimpleNamespace())
+    monkeypatch.setattr(
+        "taskchampion_mcp.server.ToolRegistry",
+        lambda **_kw: SimpleNamespace(initialized=True),
+    )
     monkeypatch.setattr("taskchampion_mcp.server.FastMCP", FakeMCP)
     monkeypatch.setattr("taskchampion_mcp.server._build_instructions", lambda *_a, **_kw: "x")
 
@@ -336,16 +374,19 @@ def test_create_server_registers_role_tools_when_initialised(
     ctb = MagicMock()
     gen = MagicMock()
     man = MagicMock()
+    rld = MagicMock()
     monkeypatch.setattr("taskchampion_mcp.server._register_onboarding_tools", onb)
     monkeypatch.setattr("taskchampion_mcp.server._register_contributor_tools", ctb)
     monkeypatch.setattr("taskchampion_mcp.server._register_generator_tools", gen)
     monkeypatch.setattr("taskchampion_mcp.server._register_manager_tools", man)
+    monkeypatch.setattr("taskchampion_mcp.server._register_reload_tool", rld)
 
     _ = create_server(config=cfg)
-    assert not onb.called
+    assert onb.called
     assert ctb.called
     assert gen.called
     assert man.called
+    assert rld.called
 
 
 def test_create_server_exits_when_taskwarrior_missing(monkeypatch: pytest.MonkeyPatch) -> None:

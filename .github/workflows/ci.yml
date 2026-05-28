@@ -68,3 +68,37 @@ jobs:
         run: |
           mkdir -p /tmp/taskdata-smoke
           TASKDATA=/tmp/taskdata-smoke uv run python tests/smoke_test_mcp.py
+
+  acceptance:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        target: [windsurf, cursor, neovim]
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Install Taskwarrior and Timewarrior
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y taskwarrior timewarrior
+          mkdir -p "$HOME/.task"
+          printf "data.location=%s/.task\nconfirmation=no\n" "$HOME" > "$HOME/.taskrc"
+
+      - name: Run acceptance tests (${{ matrix.target }})
+        run: >
+          uv run pytest
+          tests/targets/${{ matrix.target }}/
+          tests/targets/conftest.py
+          -v --tb=short -m acceptance
