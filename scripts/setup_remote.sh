@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# TaskChampion MCP — Remote-host bootstrap (Wintermute and friends)
+# TaskChampion MCP — Remote-host bootstrap
 #
 # One-shot installer for a Linux box that already has Taskwarrior, Timewarrior,
 # and Claude Code (the `claude` CLI), but no prior taskchampion-mcp setup.
@@ -8,7 +8,7 @@
 #
 # Default behaviour matches the choices captured in the session widget:
 #   INSTALL_SOURCE=git_dev      (uv tool install from this repo's dev branch)
-#   SEED_ROLE=GENERATOR         (Wintermute autonomously creates tasks)
+#   SEED_ROLE=GENERATOR         (an autonomous remote agent creates tasks)
 #   SEED_SCHEMA=authors_custom_example
 #   AUTO_PREREQS=false          (check-and-report; never installs uv/task itself)
 #
@@ -334,7 +334,7 @@ EOF
 
 main() {
     echo ""
-    info "TaskChampion MCP — Wintermute / remote-host bootstrap"
+    info "TaskChampion MCP — Remote-host bootstrap"
     info "Source=${INSTALL_SOURCE}  Role=${SEED_ROLE}  Schema=${SEED_SCHEMA}  Dry-run=${DRY_RUN}"
     echo ""
 

@@ -916,7 +916,7 @@ This is the diagnostic tool of first resort when a user reports "I changed the c
 
 **Date:** 2026-05-26
 **Status:** Accepted
-**Author:** Claude Sonnet 4.6 / Cowork (bartosz.wichowski@dxc.com)
+**Author:** Claude Sonnet 4.6 / Cowork (taskwarriormcp@wichowski.dev)
 
 > **Note on numbering:** Originally drafted as a second ADR 16 due to a
 > merge-time collision with the Configuration Precedence ADR. Renumbered to
@@ -1221,7 +1221,7 @@ Additionally, ADR 21a's `get_runtime_capabilities` tool shipped alongside, provi
 
 ## Context
 
-Users running TaskChampion MCP on multiple hosts (e.g. the author's personal `Seraph` workstation and the `Wintermute` remote box) need a way to install the server and wire it into Claude Code on a fresh remote without:
+Users running TaskChampion MCP on multiple hosts (a primary workstation and a remote box) need a way to install the server and wire it into Claude Code on a fresh remote without:
 
 - Cloning the dev tree onto every box just to run `./dev.sh install`
 - Hand-translating the dev-install path into something published-distribution-shaped
@@ -1243,7 +1243,7 @@ Key design choices:
 
 2. **Claude Code via `claude mcp add` at `user` scope.** The script wires the installed `taskchampion-mcp-server` binary into Claude Code's user-scoped MCP config. User scope is correct because taskchampion is task-database scoped, not project scoped — the same MCP server should work from any directory inside any `claude` session.
 
-3. **Config.toml seeded by the script.** Two keys (`role` + `schema`) are the minimum to leave onboarding mode. The script writes them based on `--role` and `--schema` flags (defaults: `GENERATOR` + `authors_custom_example` for Wintermute-style autonomous operation; overridable).
+3. **Config.toml seeded by the script.** Two keys (`role` + `schema`) are the minimum to leave onboarding mode. The script writes them based on `--role` and `--schema` flags (defaults: `GENERATOR` + `authors_custom_example` for autonomous-remote-agent operation; overridable).
 
 4. **Check-only prereq policy by default.** The script verifies `uv`, `claude`, `task`, `timew` are present and reports clearly what's missing. It does NOT auto-install them unless `--auto-prereqs` is explicitly passed. Rationale: installing system packages without explicit consent is a footgun on a remote box; the user is one shell command away from doing it themselves.
 
@@ -1259,12 +1259,12 @@ Key design choices:
 - **`pipx install` instead of `uv tool install`.** Equivalent in spirit, slower install, dependency on a tool many of the target audience don't use. Rejected since the rest of the project standardises on `uv` (ADR 2).
 - **A Makefile target on the host (`make install-remote`).** Requires the repo to be present on the remote, which negates the "no clone needed" property of `uv tool install --from git+...`. Rejected.
 - **`pip install` from a wheel hosted on a private artifact server.** Closer to "enterprise" patterns but adds infrastructure. Defer until there is demand.
-- **Hardcoded role/schema defaults with no overrides.** Rejected because Wintermute (autonomous, GENERATOR-level) and a personal laptop (interactive, CONTRIBUTOR-level) want different defaults from the same script.
+- **Hardcoded role/schema defaults with no overrides.** Rejected because an autonomous remote agent (GENERATOR-level) and a personal laptop (interactive, CONTRIBUTOR-level) want different defaults from the same script.
 
 ## Consequences
 
 ### Pros
-- One file delivers a working install on any Linux box with Claude Code and Taskwarrior already present. The "hello world" of running the project on a new host is `scp scripts/setup_remote.sh wintermute: && ssh wintermute ./setup_remote.sh`.
+- One file delivers a working install on any Linux box with Claude Code and Taskwarrior already present. The "hello world" of running the project on a new host is `scp scripts/setup_remote.sh <remote>: && ssh <remote> ./setup_remote.sh`.
 - Source flexibility: a contributor can bootstrap from `git_dev` to get bleeding-edge fixes; a stable-only operator uses `pypi`. Both modes share the same downstream wiring.
 - The check-only prereq policy keeps the script honest about what it touches.
 - Idempotent + backed-up config.toml means re-running is safe — no "did I already run this?" mental overhead.
@@ -1273,7 +1273,7 @@ Key design choices:
 - Linux-only. macOS and WSL would work in principle (everything used is portable) but are not in the validated path; an ADR amendment will cover them when the testing matrix expands.
 - Claude Code is required. Hosts without `claude` on PATH get a clear error and exit — but if a user wanted to run taskchampion-mcp under a different MCP client on a remote, they'd need a different script.
 - `uv tool install` from git fetches the entire repo, not just the package. Acceptable today (the repo is small) but worth revisiting if the install size becomes a concern.
-- The script's defaults bake in opinions (`GENERATOR` + `authors_custom_example`). These are documented and overridable, but a user who runs the script blind ends up with the author's defaults. Documentation in `MESSAGE_TO_WINTERMUTE.md` and `--help` mitigates.
+- The script's defaults bake in opinions (`GENERATOR` + `authors_custom_example`). These are documented and overridable, but a user who runs the script blind ends up with the author's defaults. Documentation in `MESSAGE_TO_REMOTE_HOST.md` and `--help` mitigates.
 
 ## Cross-references
 
@@ -1281,7 +1281,7 @@ Key design choices:
 - ADR 9 — Security baseline (role + schema seeded by the script must align with the rest of the security model)
 - ADR 17 — Role-elevation asymmetry (`--role MANAGER` via this script is one of the legitimate out-of-band elevation paths)
 - ADR 18 — Installation Strategy (this script is the user-side counterpart to `dev.sh install`)
-- `scripts/MESSAGE_TO_WINTERMUTE.md` — agent-facing setup brief shipped alongside the script.
+- `scripts/MESSAGE_TO_REMOTE_HOST.md` — agent-facing setup brief shipped alongside the script.
 
 
 # ADR 21: Hybrid Tool Visibility — Decomposed into ADRs 21a, 21b, 21c
