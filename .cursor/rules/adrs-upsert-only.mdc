@@ -1,0 +1,14 @@
+---
+description: Treat ADRs.md as upsert-only and preserve existing ADR text
+alwaysApply: true
+---
+
+# ADRs Upsert-Only Policy
+
+- `docs/adrs/ADRs.md` is upsert-only.
+- Never rewrite, delete, or reorder existing ADR entries.
+- Never modify existing ADR text in place (including ADR 19).
+- Additions must be append-only:
+  - add a new ADR, or
+  - append a dated addendum section without altering prior content.
+- If a request conflicts with this policy, preserve existing ADR content and suggest an append-only alternative.

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.GabiUp2/taskchampion-mcp",
+  "description": "MCP server for Taskwarrior 3.x, TaskChampion, and Timewarrior — read, create, modify, and manage tasks from any LLM assistant.",
+  "version": "1.0.0",
+  "repository": {
+    "url": "https://github.com/GabiUp2/TaskChampion_MCP",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registry_type": "pypi",
+      "identifier": "taskchampion-mcp",
+      "version": "1.0.0",
+      "runtime": "python",
+      "runtime_arguments": [
+        "-m",
+        "taskchampion_mcp.server"
+      ],
+      "environment_variables": [],
+      "supported_platforms": [
+        "linux",
+        "macos"
+      ]
+    }
+  ],
+  "tools": [
+    { "name": "get_runtime_capabilities", "description": "Return the server's current mode, role, schema, and callable tool groups" },
+    { "name": "reload_configuration", "description": "Re-read config.toml and refresh all runtime state without restart" },
+    { "name": "get_initialization_status", "description": "Inspect first-run onboarding state" },
+    { "name": "propose_initialization_options", "description": "Return onboarding choices for the user" },
+    { "name": "analyze_existing_tasks_for_schema", "description": "Analyse existing tasks for schema inference" },
+    { "name": "analyze_taxonomy_file", "description": "Parse a taxonomy Markdown file" },
+    { "name": "generate_initial_schema_preview", "description": "Generate a reviewable schema TOML preview" },
+    { "name": "save_initial_schema", "description": "Persist an approved schema and update config" },
+    { "name": "list_preset_schemas", "description": "List bundled preset schemas" },
+    { "name": "use_preset_schema", "description": "Wire a bundled preset into config.toml" },
+    { "name": "list_tasks", "description": "List tasks matching optional filter expressions" },
+    { "name": "get_task", "description": "Get full details for a single task by UUID" },
+    { "name": "search_tasks", "description": "Search tasks by field" },
+    { "name": "annotate_task", "description": "Add an annotation to a task" },
+    { "name": "modify_task", "description": "Modify fields on an existing task" },
+    { "name": "start_task", "description": "Start working on a task" },
+    { "name": "stop_task", "description": "Stop working on a task" },
+    { "name": "get_projects", "description": "List all project names" },
+    { "name": "get_tags", "description": "List all tags" },
+    { "name": "get_active_context", "description": "Show the active Taskwarrior context" },
+    { "name": "get_schema_info", "description": "Return the loaded schema definition" },
+    { "name": "get_task_report", "description": "Run a named Taskwarrior report" },
+    { "name": "get_time_summary", "description": "Get Timewarrior time tracking summary" },
+    { "name": "get_time_status", "description": "Check if Timewarrior is tracking" },
+    { "name": "set_active_schema", "description": "Switch the active task schema" },
+    { "name": "set_taxonomy_path", "description": "Update the taxonomy file path" },
+    { "name": "set_role", "description": "Change the persisted role (downgrade only)" },
+    { "name": "create_task", "description": "Create a new task with schema validation" },
+    { "name": "create_subtask", "description": "Create a subtask linked to a parent" },
+    { "name": "batch_create_tasks", "description": "Create many tasks in one call" },
+    { "name": "complete_task", "description": "Mark a task as done" },
+    { "name": "delete_task", "description": "Delete a task" },
+    { "name": "undo_last_action", "description": "Undo the last Taskwarrior operation" },
+    { "name": "sync_tasks", "description": "Trigger task sync via TaskChampion" },
+    { "name": "bulk_modify", "description": "Modify all tasks matching filters" }
+  ]
+}

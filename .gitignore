@@ -42,3 +42,6 @@ audit.log
 
 # Local config overrides
 config.local.toml
+
+# unittest.mock MagicMock leakage when audit_log_path is mocked without spec
+MagicMock/

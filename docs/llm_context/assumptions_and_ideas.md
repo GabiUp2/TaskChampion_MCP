@@ -84,14 +84,65 @@
 - **Description:** After `task sync`, compare before/after exports to report what changed from other replicas. Useful for multi-machine setups.
 - **Status:** Captured for v0.2.0+ consideration
 
-### IDEA-003: Schema auto-generation from existing tasks
-- **Date:** 2026-05-25
-- **Author:** Human (gabiup2) — stated in initial requirements
-- **Description:** On first run, if no schema is configured, the MCP can analyze existing tasks (`task export`) to infer which UDAs are in use, their value distributions, and generate a draft schema TOML. User reviews and approves.
-- **Status:** Required for v0.1.0 (first-run wizard)
+### IDEA-003: Schema auto-generation from existing tasks + taxonomy file
+- **Date:** 2026-05-25 (extended 2026-05-25)
+- **Author:** Human (gabiup2) — stated in initial requirements; extended by human request
+- **Description:** On first run, if no schema is configured, the MCP can analyze existing tasks (`task export`) to infer which UDAs are in use, their value distributions, and generate a draft schema TOML. Extended to also accept a taxonomy markdown file (like `user/TAXONOMY.md`) that describes field semantics, lifecycle processes, conditional requirements, and phase transitions. The taxonomy enriches the generated schema with descriptions and rules beyond what raw task data can infer. User reviews and approves.
+- **Status:** Implemented — `src/taskchampion_mcp/schema_gen.py` with 41 tests. Config support via `taxonomy_path` in `config.toml`.
 
 ### IDEA-004: Project-scoped MCP configs
 - **Date:** 2026-05-25
 - **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
 - **Description:** A `.taskchampion-mcp.toml` in the project root could scope which tasks the LLM sees (e.g., only `project:personal.tooling.taskwarrior`). This prevents the LLM from seeing unrelated tasks.
 - **Status:** Captured for v0.2.0 consideration
+
+### ASM-009: MCP Python SDK FastMCP supports stdio transport by default
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Verified
+- **Source:** Confirmed via PyPI mcp 1.8.0+ documentation. `mcp.run()` defaults to stdio; `mcp.run(transport="stdio")` is explicit.
+- **Impact:** If wrong, the server entry point would fail to start.
+
+### ASM-010: Taskwarrior rc.confirmation:off suppresses interactive prompts
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — based on Taskwarrior documentation patterns
+- **Source:** Taskwarrior docs indicate `rc.confirmation:off` disables confirmation prompts. Also set `rc.bulk:0` and `rc.verbose:nothing` for non-interactive subprocess usage.
+- **Impact:** If wrong, subprocess calls could hang waiting for user input, causing timeouts.
+
+### ASM-011: Taskwarrior _version command returns version string
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — based on Tools_Usage_Reference.md
+- **Source:** `task _version` is documented as returning just the version number. Used for version detection.
+- **Impact:** Version detection would fail gracefully (returns None), server still starts with a warning.
+
+### ASM-012: URL-encoded shell metacharacters should be blocked
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — defense-in-depth decision
+- **Source:** Since subprocess argument lists prevent shell injection, URL-encoded metacharacters like `%26` are not directly dangerous. However, blocking them prevents potential double-decode attacks if any downstream component URL-decodes values.
+- **Impact:** False positive rejections of legitimate values containing `%26` etc. Unlikely in task descriptions.
+
+### ASM-014: Taxonomy markdown files follow a parseable heading structure
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — based on the project author's `user/TAXONOMY.md` format
+- **Source:** The parser expects `### N.N field_name — values` headings, markdown tables for enum values, and "Required when" phrases for conditions. Other taxonomy formats may not parse correctly.
+- **Impact:** Users with differently structured taxonomy files would get incomplete schema enrichment. Mitigated: analysis-only mode still works; taxonomy is optional.
+
+### ASM-013: MCP tool return values should be JSON strings
+- **Date:** 2026-05-25
+- **Author:** Claude claude-sonnet-4-20250514 / Windsurf Cascade
+- **Status:** Unverified — based on MCP SDK examples
+- **Source:** MCP SDK tool functions return strings. We serialize tool results as JSON strings for structured data.
+- **Impact:** If the SDK expects different return types, tools would fail. Low risk given SDK documentation examples.
+
+### IDEA-005: Differentiate schema names by generation source
+- **Date:** 2026-05-25
+- **Author:** gabiup2
+- **Description:** The schema name should reflect whether it was generated from a provided taxonomy file vs. from analyzing existing tasks alone. Current implementation uses a single "auto_generated" name. Should differentiate:
+  - `auto_generated_from_taxonomy` — when taxonomy file is provided
+  - `auto_generated_from_tasks` — when only tasks are analyzed
+  This helps users understand the source and quality of the generated schema.
+- **Status:** Captured for v0.1.0 implementation
