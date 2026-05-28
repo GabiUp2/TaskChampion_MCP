@@ -97,16 +97,18 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Allow re-tag / re-run when the version is already on PyPI (e.g. MCP Registry retry).
+          skip-existing: true
         # Uses Trusted Publishing (OIDC) — no API token needed if configured.
         # Fallback: set PYPI_API_TOKEN secret and uncomment below.
-        # with:
         #   password: ${{ secrets.PYPI_API_TOKEN }}
 
   # ------------------------------------------------------------------
   # 3. Publish to Official MCP Registry
   # ------------------------------------------------------------------
   mcp-registry:
-    needs: pypi
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
