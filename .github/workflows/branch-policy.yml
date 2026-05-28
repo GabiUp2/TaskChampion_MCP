@@ -1,0 +1,64 @@
+name: Branch policy
+
+# Enforces the promotion model: feature/* → dev → qa → main.
+#
+# Pure GitHub Actions check (no API calls, no admin scopes). Pair this with
+# a ruleset / branch protection that marks "Branch policy / validate" as a
+# required status check on `qa` and `main` so violations actually block the
+# merge button.
+#
+# Rules:
+#   * dev   — anything may PR in (feature branches, hotfixes, dependabot, etc.)
+#   * qa    — only `dev` may PR in
+#   * main  — only `qa` may PR in
+#
+# If you ever need to bypass for an emergency hotfix to main, do it explicitly
+# (temporary ruleset bypass, then revert) so the audit trail stays clean.
+
+on:
+  pull_request:
+    branches: [dev, qa, main]
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR source vs target
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "PR: ${HEAD} → ${BASE}"
+
+          case "${BASE}" in
+            dev)
+              echo "✅ dev accepts any source branch."
+              ;;
+            qa)
+              if [[ "${HEAD}" == "dev" ]]; then
+                echo "✅ qa ← dev is allowed."
+              else
+                echo "❌ qa only accepts PRs from 'dev'. Got '${HEAD}'."
+                echo "   Open this work as a PR to dev first, merge there, then qa ← dev." >&2
+                exit 1
+              fi
+              ;;
+            main)
+              if [[ "${HEAD}" == "qa" ]]; then
+                echo "✅ main ← qa is allowed."
+              else
+                echo "❌ main only accepts PRs from 'qa'. Got '${HEAD}'."
+                echo "   Promote via dev → qa → main. Hotfixes still go through qa." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "ℹ️  Target branch '${BASE}' is not policy-controlled; skipping."
+              ;;
+          esac
