@@ -7,7 +7,7 @@
 <!-- mcp-name: io.github.GabiUp2/taskchampion-mcp -->
 
 [![PyPI version](https://img.shields.io/pypi/v/taskchampion-mcp.svg)](https://pypi.org/project/taskchampion-mcp/)
-[![Release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0)
+[![GitHub release](https://img.shields.io/github/v/release/GabiUp2/TaskChampion_MCP.svg)](https://github.com/GabiUp2/TaskChampion_MCP/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.GabiUp2/taskchampion-mcp)
