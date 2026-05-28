@@ -48,7 +48,7 @@ Verified May 2026.
 
 ## Submission Checklist
 
-Ready-to-use submission templates are in `.github/MARKETPLACE_SUBMISSIONS.md`.
+Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../MARKETPLACE_SUBMISSIONS.md).
 
 | Target | Status | Notes |
 |---|---|---|

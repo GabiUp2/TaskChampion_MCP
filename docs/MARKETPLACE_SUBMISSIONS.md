@@ -95,11 +95,23 @@ and open a PR.
 Timewarrior CLI tools, exposing them as structured MCP tools for any AI assistant.
 
 **Key features:**
-- 17 tools covering full task lifecycle + time tracking
-- Schema-based task validation with presets (minimal, GTD, scrum, kanban)
-- Role-based permissions (CONTRIBUTOR / GENERATOR / MANAGER)
+- 35 tools spanning full task lifecycle, time tracking, runtime
+  reconfiguration, and capability introspection. Headline tools:
+  `list_tasks`, `create_task`, `modify_task`, `complete_task`,
+  `delete_task`, `start_task` / `stop_task`, `batch_create_tasks`,
+  `bulk_modify`, `get_task_report`, `get_time_summary`,
+  `set_active_schema`, `set_role` (downgrade-only), `reload_configuration`,
+  `get_runtime_capabilities`. Plus an 8-tool onboarding surface for first-run
+  schema setup.
+- Schema-based task validation with five bundled presets (minimal, GTD,
+  scrum, kanban, plus a real-world `authors_custom_example`)
+- Role-based permissions with strict elevation-asymmetry
+  (CONTRIBUTOR / GENERATOR / MANAGER; self-elevation forbidden via MCP per ADR 17)
 - Auto-generated schemas from existing tasks + taxonomy files
-- Rate limiting, audit logging, input sanitisation
+- Runtime reload — no IDE restart required after config changes (ADR 19)
+- Rate limiting, structured audit logging with stable JSON-Lines schema
+  (ADR 13), input sanitisation, dry-run + confirmation flow for destructive
+  operations
 
 **Install:** `pip install taskchampion-mcp` / `uvx taskchampion-mcp`
 **License:** Apache-2.0
