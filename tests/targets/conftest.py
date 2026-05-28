@@ -293,7 +293,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "post_onboarding",
             "tool": "annotate_task",
-            "params": {"task_id": "1", "annotation": "test note", "dry_run": True},
+            "params": {"uuid": "1", "annotation": "test note", "dry_run": True},
         },
     ),
     (
@@ -302,7 +302,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "post_onboarding",
             "tool": "modify_task",
-            "params": {"task_id": "1", "modifications": {"priority": "H"}, "dry_run": True},
+            "params": {"uuid": "1", "fields": {"priority": "H"}, "dry_run": True},
         },
     ),
     (
@@ -329,7 +329,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "post_onboarding",
             "tool": "set_role",
-            "params": {"role": "CONTRIBUTOR"},
+            "params": {"target_role": "CONTRIBUTOR"},
         },
     ),
     (
@@ -353,7 +353,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "generator",
             "tool": "create_subtask",
-            "params": {"parent_id": "1", "description": "Sub task", "dry_run": True},
+            "params": {"parent_uuid": "1", "description": "Sub task", "dry_run": True},
         },
     ),
     (
@@ -372,7 +372,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "manager",
             "tool": "complete_task",
-            "params": {"task_id": "1", "dry_run": True},
+            "params": {"uuid": "1", "dry_run": True},
         },
     ),
     (
@@ -381,7 +381,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "manager",
             "tool": "delete_task",
-            "params": {"task_id": "1", "dry_run": True},
+            "params": {"uuid": "1", "dry_run": True},
         },
     ),
     (
@@ -419,7 +419,7 @@ ACCEPTANCE_SCENARIOS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "phase": "post_onboarding",
             "tool": "complete_task",
-            "params": {"task_id": "1", "dry_run": True},
+            "params": {"uuid": "1", "dry_run": True},
             "expect_error": "role_insufficient",
         },
     ),
