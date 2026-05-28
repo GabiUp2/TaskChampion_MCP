@@ -1114,8 +1114,8 @@ Every successful configuration mutation MUST emit one audit log entry per ADR 13
 
 # ADR 19: Runtime Reload — Stable Tool Surface + Runtime State Checks + `reload_configuration` Tool
 
-**Date:** 2026-05-27
-**Status:** Proposed (implementation pending)
+**Date:** 2026-05-27 (proposed), 2026-05-28 (accepted)
+**Status:** Accepted — implemented in v1.0.0 (`reload_configuration` MCP tool + per-tool runtime gates; smoke test scenarios collapsed; both phases register the full 35-tool surface)
 **Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
 
 ## Context
@@ -1313,7 +1313,7 @@ The original Context section is still valid as the framing for *why* tool-surfac
 # ADR 21a: Runtime Capability Introspection Tool
 
 **Date:** 2026-05-28
-**Status:** Proposed (ready for v0.4.0 once ADR 19 lands)
+**Status:** Accepted — implemented in v1.0.0 (`get_runtime_capabilities` MCP tool registered at CONTRIBUTOR level; returns mode / role / schema / integrations / callable + uncallable tool groups with reason codes)
 **Author:** gabiup2 / Claude Opus 4.7 (1M context) via Cowork
 
 ## Context

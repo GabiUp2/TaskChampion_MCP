@@ -7,6 +7,7 @@ fixture is resolved from the per-target conftest.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
@@ -39,22 +40,58 @@ def test_acceptance(
         _assert_success(result, spec, scenario_id)
 
 
+# Match structured error codes inside a JSON response — either as the
+# response's top-level ``code`` field or the refusal-class ``error_code``
+# (per ADR 14 + ADR 17). A raw substring check is too lax: it produces false
+# positives when a successful response legitimately *mentions* an error code
+# in its data payload (e.g. ``get_runtime_capabilities`` listing
+# ``uncallable_tool_groups`` with their ``uncallable_reason`` codes).
+_CODE_FIELD = re.compile(r'"(?:error_)?code"\s*:\s*"(?P<code>[a-z_]+)"')
+
+
+def _structured_codes(content: str) -> set[str]:
+    """Return the set of error codes asserted in JSON ``code`` / ``error_code``
+    fields anywhere in ``content``. Used by both the error-expected and
+    success-expected paths."""
+    return {m.group("code") for m in _CODE_FIELD.finditer(content)}
+
+
 def _assert_structured_error(result: dict, expected_code: str, scenario_id: str) -> None:
+    """Scenario declared ``expect_error: "<code>"`` — verify the response
+    carries that code via a structured field (not a bare substring)."""
     content = _extract_content_text(result)
-    assert expected_code in content, (
-        f"[{scenario_id}] Expected error code {expected_code!r} in response. "
-        f"Got: {content[:300]}"
-    )
+    codes = _structured_codes(content)
+    if expected_code not in codes:
+        raise AssertionError(
+            f"[{scenario_id}] Expected structured error code {expected_code!r} "
+            f"in response (looked for `\"code\": \"{expected_code}\"` or "
+            f"`\"error_code\": \"{expected_code}\"`). "
+            f"Saw codes: {sorted(codes) or '(none)'}. "
+            f"Got: {content[:300]}"
+        )
 
 
 def _assert_success(result: dict, spec: dict[str, Any], scenario_id: str) -> None:
+    """Scenario expects success — verify the response does not carry a
+    refusal-class structured code, and run a tool-specific shape check."""
     content = _extract_content_text(result)
+    codes = _structured_codes(content)
 
-    error_codes = ("role_insufficient", "schema_unset", "not_available")
-    for code in error_codes:
-        assert code not in content, (
-            f"[{scenario_id}] Unexpected error {code!r} in successful response. "
-            f"Got: {content[:300]}"
+    # A successful response must not be *the* refusal — a substring match
+    # would also flag introspection-style responses that legitimately list
+    # uncallable reasons in their data. Match only on the top-level/envelope
+    # code, which we detect by checking the *first* structured code occurrence
+    # in the response. If the first occurrence is a refusal, we fail; if a
+    # later occurrence is (e.g. inside an ``uncallable_tool_groups`` array),
+    # we tolerate it.
+    first_code_match = _CODE_FIELD.search(content)
+    refusal_codes = {"role_insufficient", "schema_unset", "not_available"}
+    if first_code_match and first_code_match.group("code") in refusal_codes:
+        raise AssertionError(
+            f"[{scenario_id}] Unexpected refusal code "
+            f"{first_code_match.group('code')!r} as the envelope's primary "
+            f"code in a successful-scenario response. "
+            f"All codes seen: {sorted(codes)}. Got: {content[:300]}"
         )
 
     tool = spec["tool"]
