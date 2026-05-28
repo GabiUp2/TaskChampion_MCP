@@ -1,0 +1,1054 @@
+"""Tests for runtime first-run onboarding tools."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from taskchampion_mcp.config import Role, ServerConfig, load_config
+from taskchampion_mcp.onboarding import (
+    _ROLE_ELEVATION_FORBIDDEN_CODE,
+    analyze_existing_tasks,
+    analyze_taxonomy_file,
+    default_schema_name_for_source,
+    generate_schema_preview,
+    get_initialization_status,
+    list_preset_schemas,
+    propose_initialization_options,
+    reconfigure_active_schema,
+    reconfigure_role,
+    reconfigure_taxonomy_path,
+    save_initial_schema,
+    upsert_server_config,
+    use_preset_schema,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run every test in an empty working dir with a clean XDG_CONFIG_HOME.
+
+    Without this fixture taxonomy auto-detection would walk the real
+    project tree (where ``user/TAXONOMY.md`` exists) and the user's
+    real ``~/.config``, producing flaky, location-dependent results.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    xdg = tmp_path / "xdg"
+    xdg.mkdir()
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    return work
+
+
+class FakeTaskCLI:
+    def __init__(self, tasks: list[dict[str, Any]] | None = None, error: Exception | None = None):
+        self._tasks = tasks or []
+        self._error = error
+
+    def export_tasks(self, *filters: str) -> list[dict[str, Any]]:
+        if self._error:
+            raise self._error
+        return self._tasks
+
+
+class FakeTimewCLI:
+    def __init__(self, available: bool = True):
+        self._available = available
+
+    def available(self) -> bool:
+        return self._available
+
+
+@pytest.fixture
+def sample_tasks() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": 1,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "status": "pending",
+            "description": "Configure TaskChampion sync over VPN",
+            "project": "personal.infra.athena.services",
+            "scope": "personal",
+            "area": "infra",
+            "phase": "impl",
+            "effort": "M",
+            "confidence": "H",
+            "tags": ["linux", "taskwarrior"],
+        },
+        {
+            "id": 2,
+            "uuid": "22222222-2222-2222-2222-222222222222",
+            "status": "pending",
+            "description": "Research Timewarrior reporting taxonomy",
+            "project": "personal.tooling.taskwarrior",
+            "scope": "personal",
+            "area": "tooling",
+            "phase": "research",
+            "hypothesis": "Timewarrior tags can encode work-session semantics cleanly",
+            "effort": "S",
+            "confidence": "M",
+            "tags": ["timewarrior"],
+        },
+    ]
+
+
+@pytest.fixture
+def taxonomy_file(tmp_path: Path) -> Path:
+    path = tmp_path / "TAXONOMY.md"
+    path.write_text(
+        """# Test Taxonomy
+
+## UDA Reference
+
+### 2.1 `scope` — personal | work
+**Required on all tasks.** Top-level discriminator.
+
+### 2.2 `phase` — idea | research | impl | validate | blocked
+Every task should have a phase.
+
+### 2.3 `hypothesis` — free string
+Required when `phase` is `research`.
+
+### 2.4 `effort` — XS | S | M | L | XL
+T-shirt size estimate.
+
+## Maintenance
+
+- **When promoting a task from `idea` → `research`:**
+  Add `hypothesis` describing what you are trying to answer.
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_status_needs_onboarding_when_only_minimal_schema(sample_tasks: list[dict[str, Any]]):
+    config = ServerConfig(schema_name="minimal", schema_path=None, taxonomy_path=None)
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks), FakeTimewCLI(True))
+
+    assert status["initialised"] is False
+    assert status["needs_onboarding"] is True
+    assert status["task_count"] == 2
+    assert status["recommended_next_action"] == "infer_schema_from_existing_tasks"
+    assert status["safe_to_mutate_tasks"] is False
+
+
+def test_status_initialised_with_existing_schema(
+    tmp_path: Path, sample_tasks: list[dict[str, Any]]
+):
+    schema = tmp_path / "schema.toml"
+    schema.write_text("[meta]\nname = 'x'\n", encoding="utf-8")
+    config = ServerConfig(schema_path=str(schema))
+
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks))
+
+    assert status["initialised"] is True
+    assert status["needs_onboarding"] is False
+    assert status["custom_schema_exists"] is True
+
+
+def test_propose_options_recommends_taxonomy_when_available(taxonomy_file: Path):
+    status = {
+        "needs_onboarding": True,
+        "recommended_next_action": "use_detected_taxonomy",
+        "task_count": 2,
+        "taxonomy_exists": False,
+        "detected_taxonomy_paths": [str(taxonomy_file)],
+    }
+
+    options = propose_initialization_options(status)
+    by_id = {item["id"]: item for item in options["options"]}
+
+    assert by_id["use_taxonomy"]["recommended"] is True
+    assert by_id["hybrid_taxonomy_plus_tasks"]["recommended"] is True
+    assert by_id["infer_from_tasks"]["recommended"] is False
+
+
+def test_analyze_existing_tasks_detects_udas(sample_tasks: list[dict[str, Any]]):
+    result = analyze_existing_tasks(FakeTaskCLI(sample_tasks))
+
+    assert result["success"] is True
+    assert result["task_count"] == 2
+    assert "scope" in result["uda_fields"]
+    assert "phase" in result["uda_fields"]
+    assert result["fields"]["scope"]["inferred_values"] == ["personal"]
+
+
+def test_analyze_existing_tasks_reports_export_error():
+    result = analyze_existing_tasks(FakeTaskCLI(error=RuntimeError("boom")))
+
+    assert result["error"] is True
+    assert "boom" in result["message"]
+
+
+def test_analyze_taxonomy_file_extracts_fields(taxonomy_file: Path):
+    result = analyze_taxonomy_file(str(taxonomy_file))
+
+    assert result["success"] is True
+    assert "scope" in result["fields"]
+    assert result["fields"]["scope"]["allowed_values"] == ["personal", "work"]
+    assert result["condition_count"] >= 1
+
+
+def test_generate_schema_preview_is_non_mutating(
+    sample_tasks: list[dict[str, Any]], taxonomy_file: Path
+):
+    config = ServerConfig(taxonomy_path=str(taxonomy_file))
+
+    result = generate_schema_preview(config, FakeTaskCLI(sample_tasks))
+
+    assert result["success"] is True
+    assert result["mutated"] is False
+    assert "[meta]" in result["schema_toml"]
+    assert "[fields.scope]" in result["schema_toml"]
+    assert result["summary"]["conditions_from_taxonomy"] >= 1
+
+
+def test_generate_schema_preview_requires_tasks_or_taxonomy():
+    config = ServerConfig()
+
+    result = generate_schema_preview(config, FakeTaskCLI([]))
+
+    assert result["error"] is True
+    assert "no exported tasks and no taxonomy" in result["message"]
+
+
+def test_save_initial_schema_writes_schema_without_config_update(tmp_path: Path):
+    out = tmp_path / "generated.toml"
+    schema_toml = '[meta]\nname = "auto_generated"\n'
+
+    result = save_initial_schema(
+        schema_toml=schema_toml,
+        output_path=str(out),
+        update_config=False,
+    )
+
+    assert result["success"] is True
+    assert out.exists()
+    assert out.read_text(encoding="utf-8") == schema_toml
+    assert result["config_updated"] is False
+
+
+def test_save_initial_schema_refuses_overwrite_without_flag(tmp_path: Path):
+    out = tmp_path / "generated.toml"
+    out.write_text("old", encoding="utf-8")
+
+    result = save_initial_schema(
+        schema_toml='[meta]\nname = "new"\n',
+        output_path=str(out),
+        update_config=False,
+    )
+
+    assert result["error"] is True
+    assert "already exists" in result["message"]
+    assert out.read_text(encoding="utf-8") == "old"
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def test_default_schema_name_for_source_is_source_aware():
+    assert default_schema_name_for_source(True, True) == "auto_generated_from_taxonomy_and_tasks"
+    assert default_schema_name_for_source(True, False) == "auto_generated_from_taxonomy"
+    assert default_schema_name_for_source(False, True) == "auto_generated_from_tasks"
+    assert default_schema_name_for_source(False, False) == "auto_generated"
+
+
+def test_generate_schema_preview_uses_source_aware_default(
+    sample_tasks: list[dict[str, Any]], taxonomy_file: Path
+):
+    """Preview without an explicit name picks the source-aware default."""
+    config_taxonomy_only = ServerConfig(taxonomy_path=str(taxonomy_file))
+
+    only_taxonomy = generate_schema_preview(config_taxonomy_only, FakeTaskCLI([]), schema_name=None)
+    assert only_taxonomy["success"] is True
+    assert only_taxonomy["schema_name"] == "auto_generated_from_taxonomy"
+
+    config_no_taxonomy = ServerConfig()
+    only_tasks = generate_schema_preview(
+        config_no_taxonomy, FakeTaskCLI(sample_tasks), schema_name=None
+    )
+    assert only_tasks["success"] is True
+    assert only_tasks["schema_name"] == "auto_generated_from_tasks"
+
+    both = generate_schema_preview(
+        config_taxonomy_only, FakeTaskCLI(sample_tasks), schema_name=None
+    )
+    assert both["success"] is True
+    assert both["schema_name"] == "auto_generated_from_taxonomy_and_tasks"
+
+
+# ---------------------------------------------------------------------------
+# Status payload extras
+# ---------------------------------------------------------------------------
+
+
+def test_status_includes_available_presets(sample_tasks: list[dict[str, Any]]):
+    config = ServerConfig()
+    status = get_initialization_status(config, FakeTaskCLI(sample_tasks))
+    assert "minimal" in status["available_presets"]
+    # Sanity check that the listing matches the bundled directory contents.
+    assert set(status["available_presets"]) >= {"minimal", "gtd", "kanban", "scrum"}
+
+
+# ---------------------------------------------------------------------------
+# Propose-options includes preset metadata + next-tools
+# ---------------------------------------------------------------------------
+
+
+def test_propose_options_advertises_preset_tools():
+    status = {
+        "needs_onboarding": True,
+        "recommended_next_action": "ask_user_for_taxonomy_or_select_preset",
+        "task_count": 0,
+        "taxonomy_exists": False,
+        "detected_taxonomy_paths": [],
+        "available_presets": ["minimal", "gtd"],
+    }
+
+    options = propose_initialization_options(status)
+    by_id = {item["id"]: item for item in options["options"]}
+
+    preset_option = by_id["use_builtin_preset"]
+    assert preset_option["next_tools"] == ["list_preset_schemas", "use_preset_schema"]
+    assert preset_option["available_presets"] == ["minimal", "gtd"]
+    assert preset_option["recommended"] is True
+
+
+def test_propose_options_lists_followup_tools_for_every_option(tmp_path: Path):
+    status = {
+        "needs_onboarding": True,
+        "recommended_next_action": "use_detected_taxonomy",
+        "task_count": 2,
+        "taxonomy_exists": False,
+        "detected_taxonomy_paths": [str(tmp_path / "TAXONOMY.md")],
+    }
+
+    options = propose_initialization_options(status)
+    for item in options["options"]:
+        assert "next_tools" in item, item
+        assert item["next_tools"], item
+
+
+# ---------------------------------------------------------------------------
+# Preset listing and selection
+# ---------------------------------------------------------------------------
+
+
+def test_list_preset_schemas_returns_bundled_presets():
+    listing = list_preset_schemas()
+    assert listing["success"] is True
+    assert listing["preset_count"] >= 1
+    names = {item["name"] for item in listing["presets"]}
+    assert {"minimal", "gtd", "kanban", "scrum"}.issubset(names)
+    minimal = next(item for item in listing["presets"] if item["name"] == "minimal")
+    assert minimal["description"]  # bundled preset has a description
+
+
+def test_use_preset_schema_writes_named_schema_to_config(tmp_path, monkeypatch):
+    """Default selection just sets schema = "<preset>" without copying."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = use_preset_schema(preset_name="minimal")
+    assert result["success"] is True
+    assert result["copied_to"] is None
+    assert result["config_updated"] is True
+    body = cfg_path.read_text(encoding="utf-8")
+    assert "[server]" in body
+    assert 'schema = "minimal"' in body
+
+
+def test_use_preset_schema_rejects_unknown_preset(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: tmp_path / "config.toml",
+    )
+
+    result = use_preset_schema(preset_name="not_a_real_preset")
+    assert result["error"] is True
+    assert "not_a_real_preset" in result["message"]
+    assert "minimal" in result["available_presets"]
+
+
+def test_use_preset_schema_with_copy_writes_file_and_path(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    target = tmp_path / "personal_minimal.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = use_preset_schema(
+        preset_name="minimal",
+        output_path=str(target),
+        copy=True,
+    )
+    assert result["success"] is True
+    assert result["copied_to"] == str(target.resolve())
+    assert target.exists()
+    body = cfg_path.read_text(encoding="utf-8")
+    assert f'schema_path = "{target.resolve()}"' in body
+
+
+def test_use_preset_schema_copy_refuses_overwrite_without_flag(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    target = tmp_path / "preset_copy.toml"
+    target.write_text("existing content", encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = use_preset_schema(
+        preset_name="minimal",
+        output_path=str(target),
+        copy=True,
+        overwrite=False,
+    )
+    assert result["error"] is True
+    assert "already exists" in result["message"]
+    assert target.read_text(encoding="utf-8") == "existing content"
+
+
+# ---------------------------------------------------------------------------
+# upsert_server_config — single implementation, shared by CLI and MCP
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_server_config_creates_new_file_with_server_section(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    schema_target = str(tmp_path / "generated.toml")
+    taxonomy_target = str(tmp_path / "TAXONOMY.md")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(schema_path=schema_target, taxonomy_path=taxonomy_target)
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert "[server]" in body
+    assert f'schema_path = "{schema_target}"' in body
+    assert f'taxonomy_path = "{taxonomy_target}"' in body
+
+
+def test_upsert_server_config_clears_schema_path_when_switching_to_preset(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    old_schema = tmp_path / "old_generated.toml"
+    cfg_path.write_text(
+        f'[server]\nschema_path = "{old_schema}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(schema_name="kanban", clear_schema_path=True)
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert 'schema = "kanban"' in body
+    # the old schema_path line is preserved but commented out for traceability
+    assert "# schema_path" in body
+
+
+def test_upsert_server_config_overrides_named_schema_when_path_given(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    new_schema = str(tmp_path / "generated.toml")
+    cfg_path.write_text('[server]\nschema = "minimal"\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(schema_path=new_schema)
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert f'schema_path = "{new_schema}"' in body
+    assert '# schema = "minimal"' in body
+
+
+def test_upsert_server_config_updates_existing_keys_in_place(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    old_schema = tmp_path / "old.toml"
+    old_taxonomy = tmp_path / "old.md"
+    new_schema = tmp_path / "new.toml"
+    new_taxonomy = tmp_path / "new.md"
+    cfg_path.write_text(
+        f'[server]\nschema_path = "{old_schema}"\ntaxonomy_path = "{old_taxonomy}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(schema_path=str(new_schema), taxonomy_path=str(new_taxonomy))
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert body.count(f'schema_path = "{new_schema}"') == 1
+    assert body.count(f'taxonomy_path = "{new_taxonomy}"') == 1
+    assert str(old_schema) not in body
+    assert str(old_taxonomy) not in body
+
+
+# ---------------------------------------------------------------------------
+# Role persistence — the actual bug fix
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_server_config_writes_role_on_new_file(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(schema_name="minimal", role=Role.GENERATOR)
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert "[server]" in body
+    assert 'role = "GENERATOR"' in body
+    assert 'schema = "minimal"' in body
+
+
+def test_upsert_server_config_replaces_existing_role_in_place(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        '[server]\nrole = "CONTRIBUTOR"\nschema = "minimal"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    upsert_server_config(role=Role.MANAGER)
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert body.count('role = "MANAGER"') == 1
+    assert 'role = "CONTRIBUTOR"' not in body
+    # Schema entry left untouched.
+    assert 'schema = "minimal"' in body
+
+
+def test_upsert_server_config_validates_role(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    with pytest.raises(ValueError):
+        upsert_server_config(role="NOT_A_ROLE")
+
+    # File must not be created when validation fails.
+    assert not cfg_path.exists()
+
+
+def test_save_initial_schema_persists_default_contributor_role(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    schema_toml = '[meta]\nname = "auto_generated"\n'
+    out = tmp_path / "generated.toml"
+
+    result = save_initial_schema(schema_toml=schema_toml, output_path=str(out))
+
+    assert result["success"] is True
+    assert result["role"] == Role.CONTRIBUTOR
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert 'role = "CONTRIBUTOR"' in body
+    assert f'schema_path = "{out}"' in body
+
+
+def test_save_initial_schema_accepts_explicit_role(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    out = tmp_path / "generated.toml"
+    result = save_initial_schema(
+        schema_toml='[meta]\nname = "auto_generated"\n',
+        output_path=str(out),
+        role="manager",  # lowercase to verify validation/uppercasing
+    )
+
+    assert result["success"] is True
+    assert result["role"] == Role.MANAGER
+    assert 'role = "MANAGER"' in cfg_path.read_text(encoding="utf-8")
+
+
+def test_save_initial_schema_rejects_invalid_role(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = save_initial_schema(
+        schema_toml='[meta]\nname = "x"\n',
+        output_path=str(tmp_path / "generated.toml"),
+        role="ADMIN",
+    )
+    assert result["error"] is True
+    # Schema file must NOT be written when role validation fails.
+    assert not (tmp_path / "generated.toml").exists()
+    assert not cfg_path.exists()
+
+
+def test_use_preset_schema_persists_role(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = use_preset_schema(preset_name="minimal", role="GENERATOR")
+    assert result["success"] is True
+    assert result["role"] == Role.GENERATOR
+
+    body = cfg_path.read_text(encoding="utf-8")
+    assert 'role = "GENERATOR"' in body
+    assert 'schema = "minimal"' in body
+
+
+def test_onboarding_round_trip_satisfies_requires_onboarding():
+    """End-to-end: after use_preset_schema, the next load_config reports a
+    fully-configured server, i.e. requires_onboarding == False.
+
+    This is the regression for the actual bug: previously the onboarding
+    flow wrote the schema but never the role, so the server stayed in
+    onboarding mode forever.
+
+    Uses the autouse ``_isolate_environment`` fixture's XDG sandbox, so
+    ``upsert_server_config`` and ``load_config`` both resolve to the same
+    isolated config path.
+    """
+    result = use_preset_schema(preset_name="minimal")
+    assert result["success"] is True
+
+    cfg = load_config()
+    assert cfg.explicit_schema_configured is True
+    assert cfg.explicit_role_configured is True
+    # Mirror the server.py requires_onboarding predicate.
+    assert (cfg.explicit_role_configured and cfg.explicit_schema_configured) is True
+
+
+# ---------------------------------------------------------------------------
+# Status + propose payload now surface role state
+# ---------------------------------------------------------------------------
+
+
+def test_status_surfaces_role_state_for_unconfigured_role():
+    config = ServerConfig()  # explicit_role_configured defaults to False
+    status = get_initialization_status(config, FakeTaskCLI([]))
+    assert status["role_configured"] is False
+    assert status["needs_role_selection"] is True
+    assert status["active_role"] == Role.CONTRIBUTOR
+    assert set(status["available_roles"]) == set(Role._HIERARCHY)
+
+
+def test_status_surfaces_role_state_when_configured(tmp_path: Path):
+    schema = tmp_path / "schema.toml"
+    schema.write_text("[meta]\nname = 'x'\n", encoding="utf-8")
+    config = ServerConfig(
+        role=Role.MANAGER,
+        schema_path=str(schema),
+        explicit_role_configured=True,
+        explicit_schema_configured=True,
+    )
+
+    status = get_initialization_status(config, FakeTaskCLI([]))
+    assert status["role_configured"] is True
+    assert status["needs_role_selection"] is False
+    assert status["active_role"] == Role.MANAGER
+
+
+def test_propose_options_includes_role_choice_block():
+    status = {
+        "needs_onboarding": True,
+        "recommended_next_action": "ask_user_for_taxonomy_or_select_preset",
+        "task_count": 0,
+        "taxonomy_exists": False,
+        "detected_taxonomy_paths": [],
+        "available_presets": ["minimal"],
+        "active_role": Role.CONTRIBUTOR,
+        "role_configured": False,
+        "needs_role_selection": True,
+    }
+
+    options = propose_initialization_options(status)
+
+    assert "roles" in options
+    roles_block = options["roles"]
+    assert roles_block["currently_configured"] is False
+    assert roles_block["recommended_role"] == Role.CONTRIBUTOR
+    names = [item["name"] for item in roles_block["available_roles"]]
+    assert names == list(Role._HIERARCHY)
+    assert options["needs_role_selection"] is True
+
+
+# ---------------------------------------------------------------------------
+# Post-onboarding reconfiguration (ADR 17)
+#
+# These tests exercise the three reconfigure_* helpers that back the
+# CONTRIBUTOR-level MCP tools: set_active_schema, set_taxonomy_path, set_role.
+# The asymmetry — role downgrade allowed, role upgrade forbidden — is the
+# load-bearing security invariant; multiple tests pin it down explicitly.
+# ---------------------------------------------------------------------------
+
+
+def test_reconfigure_active_schema_with_preset_name(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="minimal")
+    assert result["success"] is True
+    assert result["restart_required"] is True
+    body = cfg_path.read_text(encoding="utf-8")
+    assert 'schema = "minimal"' in body
+
+
+def test_reconfigure_active_schema_with_path(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    custom = tmp_path / "custom.toml"
+    custom.write_text('[meta]\nname = "custom"\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_path=str(custom))
+    assert result["success"] is True
+    assert result["schema_path"] == str(custom.resolve())
+    body = cfg_path.read_text(encoding="utf-8")
+    assert f'schema_path = "{custom.resolve()}"' in body
+
+
+def test_reconfigure_active_schema_rejects_both_args():
+    result = reconfigure_active_schema(schema_name="minimal", schema_path="/x")
+    assert result["error"] is True
+    assert "not both" in result["message"].lower()
+
+
+def test_reconfigure_active_schema_rejects_neither_arg():
+    result = reconfigure_active_schema()
+    assert result["error"] is True
+
+
+def test_reconfigure_active_schema_rejects_unknown_preset(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="does_not_exist")
+    assert result["error"] is True
+    assert "Unknown preset" in result["message"]
+    assert "minimal" in result["available_presets"]
+    # Config must not be touched on validation failure.
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_active_schema_rejects_missing_path(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_path=str(tmp_path / "no_such.toml"))
+    assert result["error"] is True
+    assert "not found" in result["message"].lower()
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_taxonomy_path_writes_existing_file(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    taxonomy = tmp_path / "TAXONOMY.md"
+    taxonomy.write_text("# tax", encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_taxonomy_path(str(taxonomy))
+    assert result["success"] is True
+    body = cfg_path.read_text(encoding="utf-8")
+    assert f'taxonomy_path = "{taxonomy.resolve()}"' in body
+
+
+def test_reconfigure_taxonomy_path_rejects_missing(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_taxonomy_path(str(tmp_path / "missing.md"))
+    assert result["error"] is True
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_taxonomy_path_rejects_directory(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_taxonomy_path(str(tmp_path))  # tmp_path is a dir
+    assert result["error"] is True
+    assert "not a regular file" in result["message"].lower()
+
+
+def test_reconfigure_role_downgrade_manager_to_contributor(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.MANAGER,
+        target_role=Role.CONTRIBUTOR,
+    )
+    assert result["success"] is True
+    assert result["previous_role"] == Role.MANAGER
+    assert result["new_role"] == Role.CONTRIBUTOR
+    body = cfg_path.read_text(encoding="utf-8")
+    assert 'role = "CONTRIBUTOR"' in body
+
+
+def test_reconfigure_role_downgrade_generator_to_contributor(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.GENERATOR,
+        target_role=Role.CONTRIBUTOR,
+    )
+    assert result["success"] is True
+    assert 'role = "CONTRIBUTOR"' in cfg_path.read_text(encoding="utf-8")
+
+
+def test_reconfigure_role_same_level_is_noop_success(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.CONTRIBUTOR,
+        target_role=Role.CONTRIBUTOR,
+    )
+    assert result["success"] is True
+    assert result["previous_role"] == result["new_role"] == Role.CONTRIBUTOR
+
+
+@pytest.mark.parametrize(
+    "current,target",
+    [
+        (Role.CONTRIBUTOR, Role.GENERATOR),
+        (Role.CONTRIBUTOR, Role.MANAGER),
+        (Role.GENERATOR, Role.MANAGER),
+    ],
+)
+def test_reconfigure_role_upgrade_is_forbidden(tmp_path, monkeypatch, current, target):
+    """ADR 17: self-elevation via MCP must always be refused, regardless of
+    current or target role. Config must not be touched."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(current_role=current, target_role=target)
+    assert result["error"] is True
+    assert result["error_code"] == _ROLE_ELEVATION_FORBIDDEN_CODE
+    assert result["current_role"] == current
+    assert result["requested_role"] == target
+    # Critical: forbidden call MUST NOT have written anything to disk.
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_role_rejects_invalid_target(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(current_role=Role.MANAGER, target_role="ADMIN")
+    assert result["error"] is True
+    # Must NOT carry the elevation code (that's reserved for legitimate-but-refused
+    # role names; "ADMIN" isn't even a valid role).
+    assert result.get("error_code") != _ROLE_ELEVATION_FORBIDDEN_CODE
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_round_trip_then_load_config_sees_new_state(monkeypatch):
+    """End-to-end via the autouse XDG sandbox: set_active_schema(preset) +
+    set_role(downgrade) both persist and survive a fresh load_config()."""
+    # Start with a fully-configured server.
+    use_preset_schema(preset_name="minimal", role=Role.MANAGER)
+    pre = load_config()
+    assert pre.role == Role.MANAGER
+    assert pre.schema_name == "minimal"
+
+    # Switch schema and downgrade in one round.
+    schema_result = reconfigure_active_schema(schema_name="gtd")
+    assert schema_result["success"] is True
+    role_result = reconfigure_role(
+        current_role=pre.role,
+        target_role=Role.CONTRIBUTOR,
+    )
+    assert role_result["success"] is True
+
+    post = load_config()
+    assert post.role == Role.CONTRIBUTOR
+    assert post.schema_name == "gtd"
+    assert post.explicit_role_configured is True
+    assert post.explicit_schema_configured is True
+
+
+# ---------------------------------------------------------------------------
+# dry_run support for reconfigure_* (audit finding #6 / v0.3.2)
+#
+# Every other write tool in the codebase honours dry_run. The reconfigure
+# tools used to be the asymmetric exception; v0.3.2 brings them into the
+# same pattern. The load-bearing invariant: dry_run=True must NEVER touch
+# config.toml, regardless of whether the inputs were valid or invalid.
+# ---------------------------------------------------------------------------
+
+
+def test_reconfigure_active_schema_dry_run_with_preset_name(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="gtd", dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["schema_name"] == "gtd"
+    assert result["preview"]["would_write"] == {"schema": "gtd"}
+    # Critical: NO disk write on dry_run
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_active_schema_dry_run_with_path(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    custom = tmp_path / "custom.toml"
+    custom.write_text('[meta]\nname = "custom"\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_path=str(custom), dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["schema_path"] == str(custom.resolve())
+    assert "would_write" in result["preview"]
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_active_schema_dry_run_still_validates(tmp_path, monkeypatch):
+    """Validation runs even in dry_run mode — bad input is rejected, no
+    file written."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_active_schema(schema_name="bogus", dry_run=True)
+    assert result["error"] is True
+    assert "Unknown preset" in result["message"]
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_taxonomy_path_dry_run(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    taxonomy = tmp_path / "TAXONOMY.md"
+    taxonomy.write_text("# tax", encoding="utf-8")
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_taxonomy_path(str(taxonomy), dry_run=True)
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["taxonomy_path"] == str(taxonomy.resolve())
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_role_dry_run_downgrade(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.MANAGER,
+        target_role=Role.CONTRIBUTOR,
+        dry_run=True,
+    )
+    assert result["success"] is True
+    assert result["code"] == "dry_run"
+    assert result["previous_role"] == Role.MANAGER
+    assert result["new_role"] == Role.CONTRIBUTOR
+    assert result["preview"]["would_write"] == {"role": Role.CONTRIBUTOR}
+    assert not cfg_path.exists()
+
+
+def test_reconfigure_role_dry_run_does_not_bypass_elevation_refusal(tmp_path, monkeypatch):
+    """ADR 17 invariant: a forbidden elevation is forbidden whether or not
+    the LLM was just "asking". dry_run=True still returns the refusal —
+    it does NOT silently succeed as a "preview"."""
+    cfg_path = tmp_path / "config.toml"
+    monkeypatch.setattr(
+        "taskchampion_mcp.onboarding.default_config_path",
+        lambda: cfg_path,
+    )
+
+    result = reconfigure_role(
+        current_role=Role.CONTRIBUTOR,
+        target_role=Role.MANAGER,
+        dry_run=True,
+    )
+    assert result["error"] is True
+    assert result["error_code"] == _ROLE_ELEVATION_FORBIDDEN_CODE
+    # Importantly: no "code: dry_run" — refusal trumps preview
+    assert result.get("code") != "dry_run"
+    assert not cfg_path.exists()

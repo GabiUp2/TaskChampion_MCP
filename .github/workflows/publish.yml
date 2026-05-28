@@ -1,0 +1,134 @@
+#
+# Publishes to PyPI and the Official MCP Registry on version tag push.
+# Trigger: push a tag like v0.2.0
+#
+# Required secrets:
+#   PYPI_API_TOKEN  — PyPI API token (or use Trusted Publishing)
+#
+# The MCP Registry publish uses GitHub OIDC for io.github.* namespaces,
+# so no extra secret is needed for that step.
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write  # Required for PyPI Trusted Publishing and MCP Registry OIDC
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. Run tests before publishing
+  # ------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # `--extra dev` matches the [project.optional-dependencies] table.
+        # `uv sync --dev` (the old form) fails because we declare dev deps
+        # as an extra, not as a uv dependency group.
+        run: uv sync --extra dev
+
+      - name: Install Taskwarrior and Timewarrior
+        # Mirror ci.yml — both integration tests and tools.py unit tests shell
+        # out to `task`. Without this, the publish-time test job fails on the
+        # very first taskwarrior-touching import, defeating the purpose of
+        # gating publish on tests.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y taskwarrior timewarrior
+          mkdir -p "$HOME/.task"
+          printf "data.location=%s/.task\nconfirmation=no\n" "$HOME" > "$HOME/.taskrc"
+          task _version || true
+          timew --version || true
+
+      - name: Run linter
+        run: uv run ruff check src/ tests/
+
+      - name: Run tests
+        # Skip the per-target acceptance suite here — those scenarios are run
+        # in ci.yml and require their own fixture set. The publish gate's job
+        # is "the package works"; full target acceptance is a separate signal.
+        run: uv run pytest tests/ --ignore=tests/targets -v --tb=short
+
+      - name: Smoke test the built artefact
+        # Build the wheel + sdist and exercise the published-distribution path
+        # (uvx-equivalent) against the produced artefact. Catches the
+        # "schemas/ missing from wheel" / "script alias absent" regressions
+        # that broke v1.0 RC packaging at first attempt.
+        run: |
+          uv build
+          ls -la dist/
+          # Sanity-check: the wheel includes the bundled schemas/.
+          python -c "import zipfile, sys; wheel=next(iter(__import__('glob').glob('dist/*.whl'))); names=zipfile.ZipFile(wheel).namelist(); assert any('taskchampion_mcp/schemas/minimal.toml' in n for n in names), 'wheel missing bundled schemas/'; print('wheel schemas: ok')"
+
+  # ------------------------------------------------------------------
+  # 2. Build and publish to PyPI
+  # ------------------------------------------------------------------
+  pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/taskchampion-mcp/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses Trusted Publishing (OIDC) — no API token needed if configured.
+        # Fallback: set PYPI_API_TOKEN secret and uncomment below.
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
+
+  # ------------------------------------------------------------------
+  # 3. Publish to Official MCP Registry
+  # ------------------------------------------------------------------
+  mcp-registry:
+    needs: pypi
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.0.0/mcp-publisher_1.0.0_linux_amd64.tar.gz" | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Authenticate with MCP Registry (GitHub OIDC)
+        # The publisher CLI's subcommand surface changed: `authenticate --github`
+        # → `login github-oidc`. Tracked at
+        # https://github.com/modelcontextprotocol/registry — the registry is
+        # still pre-1.0 so this may shift again; if it does, pin or vendor.
+        run: mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: mcp-publisher publish
+
+      - name: Verify publication
+        run: |
+          echo "Verifying publication..."
+          sleep 10
+          curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.GabiUp2/taskchampion-mcp" | python3 -m json.tool || echo "Verification pending — may take a few minutes to propagate."

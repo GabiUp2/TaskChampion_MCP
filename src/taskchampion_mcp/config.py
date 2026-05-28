@@ -1,0 +1,354 @@
+"""Configuration loading and defaults for TaskChampion MCP server."""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+
+
+class Role:
+    CONTRIBUTOR = "CONTRIBUTOR"
+    GENERATOR = "GENERATOR"
+    MANAGER = "MANAGER"
+
+    _HIERARCHY = [CONTRIBUTOR, GENERATOR, MANAGER]
+
+    @classmethod
+    def validate(cls, value: str) -> str:
+        upper = value.upper()
+        if upper not in cls._HIERARCHY:
+            raise ValueError(f"Invalid role '{value}'. Must be one of: {cls._HIERARCHY}")
+        return upper
+
+    @classmethod
+    def level(cls, role: str) -> int:
+        return cls._HIERARCHY.index(role.upper())
+
+    @classmethod
+    def has_permission(cls, current_role: str, required_role: str) -> bool:
+        return cls.level(current_role) >= cls.level(required_role)
+
+
+# ---------------------------------------------------------------------------
+# Configuration data class
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ServerConfig:
+    role: str = Role.CONTRIBUTOR
+    schema_name: str = "minimal"
+    schema_path: str | None = None
+    task_binary: str = "task"
+    timew_binary: str = "timew"
+
+    # Configuration file status
+    config_file_exists: bool = False
+    explicit_role_configured: bool = False
+    explicit_schema_configured: bool = False
+    explicit_taxonomy_configured: bool = False
+    redacted_fields: list[str] = field(default_factory=list)
+    taxonomy_path: str | None = None
+
+    # Security settings
+    rate_limit_per_minute: int = 30
+    rate_limit_per_hour: int = 200
+    create_limit_per_hour: int = 50
+    require_confirmation: bool = True
+    dry_run_default: bool = False
+    audit_log_path: str = ""
+    taskwarrior_override_rc: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Config file locations
+# ---------------------------------------------------------------------------
+
+
+def _xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def _xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+
+
+def default_config_path() -> Path:
+    return _xdg_config_home() / "taskchampion-mcp" / "config.toml"
+
+
+def default_audit_log_path() -> Path:
+    return _xdg_data_home() / "taskchampion-mcp" / "audit.log"
+
+
+def default_schema_dir() -> Path:
+    """Return the bundled ``schemas/`` directory shipped inside the package.
+
+    The presets live at ``src/taskchampion_mcp/schemas/`` in the source tree
+    and at ``<site-packages>/taskchampion_mcp/schemas/`` in a wheel install,
+    which collapses to "sibling of this module" in both layouts.
+
+    Pre-v1.0 this resolved to ``<repo>/schemas/`` (three levels up from
+    ``config.py``). That worked for an editable install but produced an
+    empty path on a real wheel install because ``schemas/`` was at the repo
+    root, not inside the package. The relocation to
+    ``src/taskchampion_mcp/schemas/`` makes hatchling include the directory
+    automatically when packaging ``src/taskchampion_mcp/`` for the wheel.
+    """
+    return Path(__file__).resolve().parent / "schemas"
+
+
+# ---------------------------------------------------------------------------
+# Loading
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger("taskchampion_mcp.config")
+
+
+_KEY_SPECS: dict[str, tuple[str, str, str]] = {
+    "server.role": ("server", "role", "role"),
+    "server.schema": ("server", "schema", "schema_name"),
+    "server.schema_path": ("server", "schema_path", "schema_path"),
+    "server.task_binary": ("server", "task_binary", "task_binary"),
+    "server.timew_binary": ("server", "timew_binary", "timew_binary"),
+    "server.taxonomy_path": ("server", "taxonomy_path", "taxonomy_path"),
+    "server.taskrc": ("server", "taskrc", "taskwarrior_override_rc"),
+    "security.rate_limit_per_minute": (
+        "security",
+        "rate_limit_per_minute",
+        "rate_limit_per_minute",
+    ),
+    "security.rate_limit_per_hour": ("security", "rate_limit_per_hour", "rate_limit_per_hour"),
+    "security.create_limit_per_hour": (
+        "security",
+        "create_limit_per_hour",
+        "create_limit_per_hour",
+    ),
+    "security.require_confirmation": ("security", "require_confirmation", "require_confirmation"),
+    "security.dry_run_default": ("security", "dry_run_default", "dry_run_default"),
+    "security.redacted_fields": ("security", "redacted_fields", "redacted_fields"),
+    "logging.audit_log": ("logging", "audit_log", "audit_log_path"),
+}
+
+_ENV_KEY_MAP: dict[str, str] = {
+    "TC_MCP_ROLE": "server.role",
+    "TC_MCP_SCHEMA": "server.schema",
+    "TC_MCP_SCHEMA_PATH": "server.schema_path",
+    "TC_MCP_TASK_BINARY": "server.task_binary",
+    "TC_MCP_TIMEW_BINARY": "server.timew_binary",
+    "TC_MCP_TAXONOMY_PATH": "server.taxonomy_path",
+    "TC_MCP_TASKRC": "server.taskrc",
+    "TC_MCP_RATE_LIMIT_PER_MINUTE": "security.rate_limit_per_minute",
+    "TC_MCP_RATE_LIMIT_PER_HOUR": "security.rate_limit_per_hour",
+    "TC_MCP_CREATE_LIMIT_PER_HOUR": "security.create_limit_per_hour",
+    "TC_MCP_REQUIRE_CONFIRMATION": "security.require_confirmation",
+    "TC_MCP_DRY_RUN_DEFAULT": "security.dry_run_default",
+    "TC_MCP_REDACTED_FIELDS": "security.redacted_fields",
+    "TC_MCP_AUDIT_LOG": "logging.audit_log",
+}
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Cannot parse boolean value: {value!r}")
+
+
+def _coerce_for_key(key: str, value: Any) -> Any:
+    if key == "server.role":
+        return Role.validate(str(value))
+    if key in {
+        "security.rate_limit_per_minute",
+        "security.rate_limit_per_hour",
+        "security.create_limit_per_hour",
+    }:
+        return int(value)
+    if key in {"security.require_confirmation", "security.dry_run_default"}:
+        return _as_bool(value)
+    if key == "security.redacted_fields":
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return [str(value)]
+    if value is None:
+        return None
+    return str(value)
+
+
+def _default_values() -> dict[str, Any]:
+    cfg = ServerConfig()
+    defaults: dict[str, Any] = {}
+    for dotted, (_, _, attr) in _KEY_SPECS.items():
+        defaults[dotted] = getattr(cfg, attr)
+    defaults["logging.audit_log"] = str(default_audit_log_path())
+    return defaults
+
+
+def _apply_values(
+    values: dict[str, Any],
+    sources: dict[str, str],
+    updates: dict[str, Any],
+    source: str,
+) -> None:
+    for key, value in updates.items():
+        if key not in _KEY_SPECS:
+            logger.warning("Ignoring unknown config key '%s' from %s", key, source)
+            continue
+        values[key] = _coerce_for_key(key, value)
+        sources[key] = source
+
+
+def _extract_known_values(data: dict[str, Any], source: str) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    known_sections = {"server", "security", "logging"}
+    for section, section_data in data.items():
+        if section not in known_sections:
+            logger.warning("Ignoring unknown config section '%s' from %s", section, source)
+            continue
+        if not isinstance(section_data, dict):
+            logger.warning("Ignoring non-table section '%s' from %s", section, source)
+            continue
+        for key, value in section_data.items():
+            dotted = f"{section}.{key}"
+            if dotted in _KEY_SPECS:
+                updates[dotted] = value
+            else:
+                logger.warning("Ignoring unknown config key '%s' from %s", dotted, source)
+    return updates
+
+
+def _discover_project_config(start_dir: Path | None = None) -> Path | None:
+    current = (start_dir or Path.cwd()).resolve()
+    while True:
+        candidate = current / ".taskchampion-mcp.toml"
+        if candidate.exists():
+            return candidate
+        if (current / ".git").exists():
+            return None
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+def _build_config(values: dict[str, Any], user_exists: bool, project_exists: bool) -> ServerConfig:
+    cfg = ServerConfig()
+    for dotted, (_, _, attr) in _KEY_SPECS.items():
+        setattr(cfg, attr, values[dotted])
+    cfg.config_file_exists = user_exists or project_exists
+    return cfg
+
+
+def load_config_with_sources(
+    path: Path | None = None,
+    *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    cli_overrides: dict[str, tuple[Any, str]] | None = None,
+) -> tuple[ServerConfig, dict[str, str]]:
+    values = _default_values()
+    sources = {k: "default" for k in values}
+    env_map = dict(env or os.environ)
+
+    user_path = path or default_config_path()
+    user_exists = user_path.exists()
+    if user_exists:
+        with open(user_path, "rb") as fh:
+            data = tomllib.load(fh)
+        _apply_values(
+            values,
+            sources,
+            _extract_known_values(data, f"file:{user_path}"),
+            f"file:{user_path}",
+        )
+
+    project_path = _discover_project_config(cwd)
+    project_exists = bool(project_path and project_path.exists())
+    if project_exists and project_path is not None:
+        with open(project_path, "rb") as fh:
+            data = tomllib.load(fh)
+        _apply_values(
+            values,
+            sources,
+            _extract_known_values(data, f"file:{project_path}"),
+            f"file:{project_path}",
+        )
+
+    for env_key, env_value in env_map.items():
+        if not env_key.startswith("TC_MCP_"):
+            continue
+        if env_key == "TC_MCP_LOG_LEVEL":
+            continue
+        dotted = _ENV_KEY_MAP.get(env_key)
+        if not dotted:
+            logger.warning("Ignoring unknown environment override '%s'", env_key)
+            continue
+        values[dotted] = _coerce_for_key(dotted, env_value)
+        sources[dotted] = f"env:{env_key}"
+
+    for key, payload in (cli_overrides or {}).items():
+        if key not in _KEY_SPECS:
+            logger.warning("Ignoring unknown CLI override key '%s'", key)
+            continue
+        value, source = payload
+        values[key] = _coerce_for_key(key, value)
+        sources[key] = source
+
+    cfg = _build_config(values, user_exists, project_exists)
+    cfg.explicit_role_configured = sources["server.role"] != "default"
+    cfg.explicit_schema_configured = (
+        sources["server.schema"] != "default" or sources["server.schema_path"] != "default"
+    )
+    cfg.explicit_taxonomy_configured = sources["server.taxonomy_path"] != "default"
+    return cfg, sources
+
+
+def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if isinstance(data, dict):
+            data = data.get(key, default)
+        else:
+            return default
+    return data
+
+
+def load_config(path: Path | None = None) -> ServerConfig:
+    """Load configuration from a TOML file, falling back to defaults."""
+    cfg, _ = load_config_with_sources(path=path)
+    return cfg
+
+
+def dump_effective_config(cfg: ServerConfig, sources: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Return effective config with source provenance per key."""
+    sensitive_tokens = ("token", "secret", "password")
+    output: dict[str, dict[str, Any]] = {}
+    for dotted, (_, _, attr) in _KEY_SPECS.items():
+        value = getattr(cfg, attr)
+        if any(t in dotted for t in sensitive_tokens):
+            display_value = "***REDACTED***"
+        else:
+            display_value = value
+        output[dotted] = {"value": display_value, "source": sources.get(dotted, "default")}
+    return output

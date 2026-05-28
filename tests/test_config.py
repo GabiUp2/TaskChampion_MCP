@@ -1,0 +1,174 @@
+"""Tests for configuration loading."""
+
+from __future__ import annotations
+
+import textwrap
+
+import pytest
+
+from taskchampion_mcp.config import (
+    Role,
+    ServerConfig,
+    dump_effective_config,
+    load_config,
+    load_config_with_sources,
+)
+
+
+class TestRole:
+    def test_validate_lowercase(self):
+        assert Role.validate("contributor") == "CONTRIBUTOR"
+
+    def test_validate_uppercase(self):
+        assert Role.validate("MANAGER") == "MANAGER"
+
+    def test_validate_invalid(self):
+        with pytest.raises(ValueError, match="Invalid role"):
+            Role.validate("ADMIN")
+
+    def test_hierarchy(self):
+        assert Role.level("CONTRIBUTOR") < Role.level("GENERATOR")
+        assert Role.level("GENERATOR") < Role.level("MANAGER")
+
+    def test_has_permission(self):
+        assert Role.has_permission("MANAGER", "CONTRIBUTOR") is True
+        assert Role.has_permission("MANAGER", "GENERATOR") is True
+        assert Role.has_permission("MANAGER", "MANAGER") is True
+        assert Role.has_permission("CONTRIBUTOR", "MANAGER") is False
+        assert Role.has_permission("CONTRIBUTOR", "GENERATOR") is False
+        assert Role.has_permission("CONTRIBUTOR", "CONTRIBUTOR") is True
+
+
+class TestLoadConfig:
+    def test_defaults_when_no_file(self, tmp_path):
+        cfg = load_config(tmp_path / "nonexistent.toml")
+        assert cfg.role == "CONTRIBUTOR"
+        assert cfg.schema_name == "minimal"
+        assert cfg.rate_limit_per_minute == 30
+
+    def test_loads_toml_file(self, tmp_path):
+        audit_path = tmp_path / "audit.log"
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            textwrap.dedent(
+                f"[server]\n"
+                f'role = "GENERATOR"\n'
+                f'schema = "gtd"\n'
+                f'task_binary = "/usr/local/bin/task"\n'
+                f"\n"
+                f"[security]\n"
+                f"rate_limit_per_minute = 50\n"
+                f"require_confirmation = false\n"
+                f'redacted_fields = ["hypothesis", "client"]\n'
+                f"\n"
+                f"[logging]\n"
+                f'audit_log = "{audit_path}"\n'
+            )
+        )
+        cfg = load_config(config_file)
+        assert cfg.role == "GENERATOR"
+        assert cfg.schema_name == "gtd"
+        assert cfg.task_binary == "/usr/local/bin/task"
+        assert cfg.rate_limit_per_minute == 50
+        assert cfg.require_confirmation is False
+        assert cfg.redacted_fields == ["hypothesis", "client"]
+        assert cfg.audit_log_path == str(audit_path)
+
+    def test_invalid_role_raises(self, tmp_path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+            [server]
+            role = "SUPERADMIN"
+        """)
+        )
+        with pytest.raises(ValueError, match="Invalid role"):
+            load_config(config_file)
+
+
+class TestServerConfig:
+    def test_default_values(self):
+        cfg = ServerConfig()
+        assert cfg.role == "CONTRIBUTOR"
+        assert cfg.schema_name == "minimal"
+        assert cfg.task_binary == "task"
+        assert cfg.timew_binary == "timew"
+        assert cfg.rate_limit_per_minute == 30
+        assert cfg.rate_limit_per_hour == 200
+        assert cfg.create_limit_per_hour == 50
+        assert cfg.require_confirmation is True
+        assert cfg.dry_run_default is False
+        assert cfg.redacted_fields == []
+
+
+class TestConfigPrecedence:
+    def test_project_config_overrides_user_config(self, tmp_path, monkeypatch):
+        user_root = tmp_path / "xdg"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(user_root))
+
+        user_cfg = user_root / "taskchampion-mcp" / "config.toml"
+        user_cfg.parent.mkdir(parents=True, exist_ok=True)
+        user_cfg.write_text('[server]\nrole = "CONTRIBUTOR"\nschema = "minimal"\n')
+
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".git").mkdir()
+        project_cfg = repo_root / ".taskchampion-mcp.toml"
+        project_cfg.write_text('[server]\nrole = "GENERATOR"\nschema = "gtd"\n')
+
+        nested = repo_root / "subdir" / "work"
+        nested.mkdir(parents=True)
+        cfg, sources = load_config_with_sources(cwd=nested)
+
+        assert cfg.role == "GENERATOR"
+        assert cfg.schema_name == "gtd"
+        assert sources["server.role"].startswith("file:")
+        assert ".taskchampion-mcp.toml" in sources["server.role"]
+
+    def test_env_overrides_project_config(self, tmp_path, monkeypatch):
+        user_root = tmp_path / "xdg"
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(user_root))
+
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".git").mkdir()
+        (repo_root / ".taskchampion-mcp.toml").write_text(
+            '[server]\nrole = "CONTRIBUTOR"\n[security]\nrate_limit_per_minute = 10\n'
+        )
+        nested = repo_root / "sub"
+        nested.mkdir()
+
+        env = {
+            "TC_MCP_ROLE": "MANAGER",
+            "TC_MCP_RATE_LIMIT_PER_MINUTE": "77",
+        }
+        cfg, sources = load_config_with_sources(cwd=nested, env=env)
+
+        assert cfg.role == "MANAGER"
+        assert cfg.rate_limit_per_minute == 77
+        assert sources["server.role"] == "env:TC_MCP_ROLE"
+        assert sources["security.rate_limit_per_minute"] == "env:TC_MCP_RATE_LIMIT_PER_MINUTE"
+
+    def test_cli_overrides_env(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".git").mkdir()
+
+        env = {"TC_MCP_ROLE": "GENERATOR"}
+        cli_overrides = {"server.role": ("MANAGER", "cli:--role")}
+        cfg, sources = load_config_with_sources(cwd=repo_root, env=env, cli_overrides=cli_overrides)
+
+        assert cfg.role == "MANAGER"
+        assert sources["server.role"] == "cli:--role"
+
+    def test_dump_effective_config_includes_source_per_key(self, tmp_path):
+        cfg = ServerConfig(role="MANAGER", schema_name="gtd", rate_limit_per_minute=42)
+        sources = {
+            "server.role": "env:TC_MCP_ROLE",
+            "server.schema": "file:/tmp/config.toml",
+            "security.rate_limit_per_minute": "default",
+        }
+        dumped = dump_effective_config(cfg, sources)
+        assert dumped["server.role"]["value"] == "MANAGER"
+        assert dumped["server.role"]["source"] == "env:TC_MCP_ROLE"
+        assert dumped["security.rate_limit_per_minute"]["source"] == "default"
