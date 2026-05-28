@@ -6,6 +6,8 @@ Use these templates to submit TaskChampion MCP to community registries.
 The Official MCP Registry is handled automatically via `./dev.sh publish`
 and the GitHub Actions `publish.yml` workflow.
 
+**Before each release tag**, work through [`docs/manuals/release_checklist.md`](manuals/release_checklist.md).
+
 ---
 
 ## 1. mcp.so — GitHub Issue Submission

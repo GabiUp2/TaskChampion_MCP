@@ -50,10 +50,12 @@ Verified May 2026.
 
 Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../MARKETPLACE_SUBMISSIONS.md).
 
+**Pre-release gate:** [`docs/manuals/release_checklist.md`](../manuals/release_checklist.md) — verify before tagging (PyPI Trusted Publishing, `server.json`, `pypi` environment, retag vs rerun).
+
 | Target | Status | Notes |
 |---|---|---|
-| PyPI | Not yet published | First: verify UX and test suite |
-| Official MCP Registry | Not yet published | Requires PyPI package to exist first |
+| PyPI | Published (`1.0.0rc1`) | Trusted Publishing via GitHub Actions |
+| Official MCP Registry | Pending retag | Requires valid `server.json` + latest `mcp-publisher` |
 | mcp.so | Not yet submitted | GitHub issue template ready |
 | awesome-mcp-servers | Not yet submitted | PR template ready |
 | smithery.ai | Not yet submitted | CLI or web form |
@@ -67,7 +69,7 @@ Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../
 1. Package published on PyPI
 2. README contains `mcp-name: io.github.GabiUp2/taskchampion-mcp`
 3. `server.json` in repo root with correct `$schema` and package metadata
-4. Authenticate via GitHub OIDC: `mcp-publisher authenticate --github`
+4. Authenticate via GitHub OIDC: `mcp-publisher login github-oidc --registry=https://registry.modelcontextprotocol.io`
 5. Publish: `mcp-publisher publish`
 
 ### mcp.so
