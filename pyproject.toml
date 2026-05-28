@@ -9,15 +9,6 @@ authors = [
     { name = "gabiup2" },
 ]
 keywords = ["mcp", "taskwarrior", "taskchampion", "timewarrior", "llm", "model-context-protocol"]
-
-[project.urls]
-Homepage = "https://github.com/GabiUp2/TaskChampion_MCP"
-Repository = "https://github.com/GabiUp2/TaskChampion_MCP"
-Documentation = "https://github.com/GabiUp2/TaskChampion_MCP/tree/main/docs"
-Changelog = "https://github.com/GabiUp2/TaskChampion_MCP/blob/main/CHANGELOG.md"
-"Release Notes" = "https://github.com/GabiUp2/TaskChampion_MCP/blob/main/docs/releases/v1.0.0.md"
-"Bug Tracker" = "https://github.com/GabiUp2/TaskChampion_MCP/issues"
-
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -33,6 +24,14 @@ dependencies = [
     "mcp>=1.8.0",
     "tomli>=2.0.0;python_version<'3.11'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/GabiUp2/TaskChampion_MCP"
+Repository = "https://github.com/GabiUp2/TaskChampion_MCP"
+Documentation = "https://github.com/GabiUp2/TaskChampion_MCP/tree/main/docs"
+Changelog = "https://github.com/GabiUp2/TaskChampion_MCP/blob/main/CHANGELOG.md"
+"Release Notes" = "https://github.com/GabiUp2/TaskChampion_MCP/blob/main/docs/releases/v1.0.0.md"
+"Bug Tracker" = "https://github.com/GabiUp2/TaskChampion_MCP/issues"
 
 [project.scripts]
 # Friendly marketplace-facing alias — what README, target install guides, and
