@@ -133,8 +133,66 @@ def make_task_stub(tmp_dir: Path) -> Path:
     return tmp_dir
 
 
+# Mapping from scenario `phase` → seeded config.toml contents.
+# ``None`` means "no config.toml at all", which is how the server enters
+# onboarding mode (per ADR 19, the operational tools are runtime-gated rather
+# than registration-gated, so even an uninitialised server registers the full
+# tool surface — the scenarios then assert that the gated tools return
+# structured ``schema_unset`` / ``role_insufficient`` errors).
+PHASE_TO_CONFIG: dict[str, dict[str, str] | None] = {
+    "onboarding": None,
+    "post_onboarding": {"role": "CONTRIBUTOR", "schema": "minimal"},
+    "post_onboarding_gtd": {"role": "CONTRIBUTOR", "schema": "gtd"},
+    "generator": {"role": "GENERATOR", "schema": "minimal"},
+    "manager": {"role": "MANAGER", "schema": "minimal"},
+}
+
+
+def seed_config_for_phase(xdg_dir: Path, phase: str) -> None:
+    """Seed XDG with the config.toml that puts the server in the state
+    required for ``phase``.
+
+    Removes any pre-existing config file when phase is ``"onboarding"`` so the
+    server starts in onboarding mode rather than carrying state from a prior
+    scenario in the same session.
+    """
+    cfg_dir = xdg_dir / "taskchampion-mcp"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path = cfg_dir / "config.toml"
+
+    if phase not in PHASE_TO_CONFIG:
+        raise ValueError(
+            f"Unknown phase {phase!r}. Add it to PHASE_TO_CONFIG with the "
+            "config keys to seed (or None for onboarding mode)."
+        )
+
+    spec = PHASE_TO_CONFIG[phase]
+    if spec is None:
+        # Onboarding phase — ensure no config.toml exists.
+        if cfg_path.exists():
+            cfg_path.unlink()
+        return
+
+    lines = ["[server]"]
+    for key, value in spec.items():
+        lines.append(f'{key} = "{value}"')
+    cfg_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def seed_post_onboarding_config(xdg_dir: Path, *, schema: str = "minimal") -> None:
-    """Seed XDG_CONFIG_HOME with a post-onboarding config.toml."""
+    """Back-compat shim around :func:`seed_config_for_phase`.
+
+    Existing per-target fixtures call this with default ``schema="minimal"``;
+    that maps to the ``post_onboarding`` phase. New code should call
+    :func:`seed_config_for_phase` directly with the scenario's phase.
+    """
+    if schema == "minimal":
+        seed_config_for_phase(xdg_dir, "post_onboarding")
+        return
+    if schema == "gtd":
+        seed_config_for_phase(xdg_dir, "post_onboarding_gtd")
+        return
+    # Custom schema name — write CONTRIBUTOR + that schema directly.
     cfg_dir = xdg_dir / "taskchampion-mcp"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "config.toml").write_text(
