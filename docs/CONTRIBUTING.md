@@ -32,6 +32,7 @@ dev ──── active development (trunk-based for solo work)
 ### For solo development (current phase)
 - Work directly on `dev` (trunk-based)
 - When ready for release: `dev` → PR to `qa` → test → PR to `main` → tag
+- Before tagging, complete [`docs/manuals/release_checklist.md`](manuals/release_checklist.md) (PyPI, MCP Registry, and workflow pitfalls)
 
 ### For public contributions
 - **Always** branch from `dev`
