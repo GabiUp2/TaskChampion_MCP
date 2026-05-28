@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "io.github.GabiUp2/taskchampion-mcp",
   "description": "MCP server for Taskwarrior 3.x, TaskChampion, and Timewarrior — read, create, modify, and manage tasks from any LLM assistant.",
-  "version": "1.0.0",
+  "version": "1.0.0rc1",
   "repository": {
     "url": "https://github.com/GabiUp2/TaskChampion_MCP",
     "source": "github"
@@ -11,7 +11,7 @@
     {
       "registry_type": "pypi",
       "identifier": "taskchampion-mcp",
-      "version": "1.0.0",
+      "version": "1.0.0rc1",
       "runtime": "python",
       "runtime_arguments": [
         "-m",
