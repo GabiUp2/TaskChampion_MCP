@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-03
+
+### Added
+
+- **Interactive-terminal guard.** When started in an interactive terminal (stdin is a TTY), the server now prints actionable guidance and exits with code 2 instead of appearing to hang and then emitting a confusing `1 validation error for JSONRPCMessage` from the MCP SDK on the first keystroke. Pass `--force` to start the stdio server anyway (for debugging).
+
 ## [1.0.0] - 2026-05-28
 
 ### Summary
