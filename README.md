@@ -6,10 +6,13 @@
 
 <!-- mcp-name: io.github.GabiUp2/taskchampion-mcp -->
 
-[![PyPI](https://img.shields.io/pypi/v/taskchampion-mcp)](https://pypi.org/project/taskchampion-mcp/)
+[![PyPI version](https://img.shields.io/pypi/v/taskchampion-mcp.svg)](https://pypi.org/project/taskchampion-mcp/)
+[![GitHub release](https://img.shields.io/github/v/release/GabiUp2/TaskChampion_MCP.svg)](https://github.com/GabiUp2/TaskChampion_MCP/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
-[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io)
+[![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.GabiUp2/taskchampion-mcp)
+
+**Latest release:** [v1.0.0](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0) — [`pip install taskchampion-mcp`](https://pypi.org/project/taskchampion-mcp/) / `uvx taskchampion-mcp`
 
 ---
 
@@ -160,6 +163,8 @@ We focus on the modern Taskwarrior 3.x + TaskChampion stack. Taskserver (taskd) 
 | [`docs/llm_context/`](docs/llm_context/) | LLM agent guidelines and tracked assumptions |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to contribute (branching, PRs, versioning) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Feature roadmap (v0.1.0 → v1.0.0) |
+| [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) | v1.0.0 release notes and install links |
+| [`docs/manuals/release_checklist.md`](docs/manuals/release_checklist.md) | Pre-tag publish checklist |
 | [`src/taskchampion_mcp/schemas/`](src/taskchampion_mcp/schemas/) | Bundled task schema presets (TOML) |
 | [`scripts/setup_remote.sh`](scripts/setup_remote.sh) | One-shot remote-host bootstrap |
 

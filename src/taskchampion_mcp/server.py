@@ -1508,8 +1508,40 @@ def main() -> None:
         print(json.dumps(dump_effective_config(cfg, sources), indent=2, sort_keys=True))
         return
 
+    guidance = _interactive_terminal_guidance(
+        is_tty=sys.stdin.isatty(), force=args.force
+    )
+    if guidance is not None:
+        print(guidance, file=sys.stderr)
+        raise SystemExit(2)
+
     mcp = create_server(config=cfg, config_path=config_path)
     mcp.run(transport="stdio")
+
+
+def _interactive_terminal_guidance(*, is_tty: bool, force: bool) -> str | None:
+    """Return guidance text when the server is started in an interactive shell.
+
+    This is a stdio MCP server: it expects JSON-RPC messages on stdin from an
+    MCP client. When stdin is an interactive terminal, the process otherwise
+    appears to hang (blocked reading stdin) and then emits a confusing
+    ``1 validation error for JSONRPCMessage`` from the MCP SDK on the first
+    keystroke. Detect that case and return actionable guidance instead.
+
+    Returns ``None`` when stdin is wired to a client (not a TTY) or when
+    ``--force`` is set, meaning the server should start normally.
+    """
+    if force or not is_tty:
+        return None
+    return (
+        "taskchampion-mcp is a stdio MCP server; it does not run interactively.\n"
+        "It expects JSON-RPC messages on stdin from an MCP client, so launching\n"
+        "it directly in a terminal will appear to hang and then report\n"
+        "'1 validation error for JSONRPCMessage' on the first keystroke.\n\n"
+        "Configure it in your MCP client instead, e.g. (Claude Desktop / Code):\n"
+        '  {"command": "uvx", "args": ["taskchampion-mcp"]}\n\n'
+        "To start the server anyway (for debugging), pass --force."
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1533,6 +1565,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config-dump",
         action="store_true",
         help="Print effective config with provenance as JSON and exit.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Start the stdio server even when stdin is an interactive terminal.",
     )
     return parser
 

@@ -5,11 +5,19 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-03
+
+### Added
+
+- **Interactive-terminal guard.** When started in an interactive terminal (stdin is a TTY), the server now prints actionable guidance and exits with code 2 instead of appearing to hang and then emitting a confusing `1 validation error for JSONRPCMessage` from the MCP SDK on the first keystroke. Pass `--force` to start the stdio server anyway (for debugging).
+
 ## [1.0.0] - 2026-05-28
 
 ### Summary
 
 First stable release. Ships the four primary stdio targets (Claude Desktop, Windsurf, Cursor, Neovim via Claude Code CLI) with a 26-scenario per-target acceptance matrix. HTTP/SSE transport and ChatGPT/Codex targets are deferred to v1.x.
+
+**Published:** PyPI `taskchampion-mcp==1.0.0`, MCP Registry `io.github.GabiUp2/taskchampion-mcp`, git tag [`v1.0.0`](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0). Pre-release: `v1.0.0-rc1` / `1.0.0rc1`. Release notes: [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md).
 
 ### Added
 

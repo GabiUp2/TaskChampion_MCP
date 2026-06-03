@@ -54,8 +54,8 @@ Ready-to-use submission templates are in [`docs/MARKETPLACE_SUBMISSIONS.md`](../
 
 | Target | Status | Notes |
 |---|---|---|
-| PyPI | Published (`1.0.0rc1`) | Trusted Publishing via GitHub Actions |
-| Official MCP Registry | Published (`1.0.0rc1`) | `io.github.GabiUp2/taskchampion-mcp` |
+| PyPI | Published (`1.0.0`) | https://pypi.org/project/taskchampion-mcp/ |
+| Official MCP Registry | Published (`1.0.0`) | `io.github.GabiUp2/taskchampion-mcp` |
 | mcp.so | Not yet submitted | GitHub issue template ready |
 | awesome-mcp-servers | Not yet submitted | PR template ready |
 | smithery.ai | Not yet submitted | CLI or web form |
