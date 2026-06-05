@@ -12,7 +12,7 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from taskchampion_mcp.config import default_schema_dir  # noqa: E402
+from taskchampion_mcp.config import default_schema_dir  # noqa: E402, I001
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ def _evaluate_condition(when_expr: str, task_data: dict[str, Any]) -> bool:
 
 
 def get_unregistered_uda_fields(
-    schema: "TaskSchema",
+    schema: TaskSchema,
     registered_udas: set[str],
 ) -> list[str]:
     """Return schema field names that require UDA registration but are absent from .taskrc.
