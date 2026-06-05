@@ -27,6 +27,9 @@ def mock_config():
 @pytest.fixture
 def mock_task_cli():
     cli = MagicMock(spec=TaskwarriorCLI)
+    # Default: all UDAs registered — tests that want to exercise the
+    # unregistered-UDA path override this explicitly.
+    cli.udas.return_value = []
     return cli
 
 
@@ -480,3 +483,205 @@ class TestToolsCoverageSprint:
         assert delete["code"] == "cli_error"
         assert undo["code"] == "cli_error"
         assert sync["code"] == "cli_error"
+
+
+# ---------------------------------------------------------------------------
+# UDA pre-flight validation tests (bug fix: schema-vs-.taskrc mismatch)
+# ---------------------------------------------------------------------------
+
+from taskchampion_mcp.schema import FieldDef, TaskSchema as _TaskSchema  # noqa: E402
+
+
+def _schema_with_uda(uda_name: str) -> _TaskSchema:
+    """Build a minimal schema that declares one UDA field."""
+    schema = _TaskSchema(name="test_uda_schema")
+    schema.fields["description"] = FieldDef(name="description", required=True, uda=False)
+    schema.fields[uda_name] = FieldDef(name=uda_name, required=False, uda=True)
+    return schema
+
+
+@pytest.fixture
+def registry_with_uda_schema(mock_config, mock_task_cli, mock_rate_limiter, mock_audit):
+    """ToolRegistry whose schema has a UDA field 'scope'."""
+    schema = _schema_with_uda("scope")
+    # mock_task_cli.udas returns [] → 'scope' is NOT registered
+    mock_task_cli.udas.return_value = []
+    schema.enum_fields = lambda: {}
+    schema.required_field_names = lambda: ["description"]
+    return ToolRegistry(
+        config=mock_config,
+        task_cli=mock_task_cli,
+        timew_cli=None,
+        schema=schema,
+        rate_limiter=mock_rate_limiter,
+        audit=mock_audit,
+    )
+
+
+@pytest.fixture
+def registry_with_registered_uda(mock_config, mock_task_cli, mock_rate_limiter, mock_audit):
+    """ToolRegistry whose schema has a UDA field 'scope' that IS registered."""
+    schema = _schema_with_uda("scope")
+    mock_task_cli.udas.return_value = ["scope"]
+    schema.enum_fields = lambda: {}
+    schema.required_field_names = lambda: ["description"]
+    return ToolRegistry(
+        config=mock_config,
+        task_cli=mock_task_cli,
+        timew_cli=None,
+        schema=schema,
+        rate_limiter=mock_rate_limiter,
+        audit=mock_audit,
+    )
+
+
+class TestCreateTaskUdaValidation:
+    """create_task must reject tasks whose UDA fields are not in .taskrc."""
+
+    def test_unregistered_uda_blocked(self, registry_with_uda_schema):
+        """Passing a UDA field not in .taskrc returns validation_error."""
+        result = registry_with_uda_schema.create_task(
+            description="Test task",
+            scope="personal",       # 'scope' UDA not registered in .taskrc
+        )
+        assert result["error"] is True
+        assert result["code"] == "validation_error"
+        assert "scope" in result["message"]
+        assert "unregistered_fields" in result.get("details", {})
+        assert "scope" in result["details"]["unregistered_fields"]
+
+    def test_registered_uda_passes(self, registry_with_registered_uda, mock_task_cli):
+        """Passing a UDA field that IS registered proceeds past the UDA check."""
+        from unittest.mock import patch
+        from taskchampion_mcp.cli import CLIResult
+        mock_task_cli.add_task.return_value = CLIResult(returncode=0, stdout="Created.", stderr="")
+        with patch("taskchampion_mcp.tools.validate_task", return_value=[]):
+            result = registry_with_registered_uda.create_task(
+                description="Test task",
+                scope="personal",   # 'scope' IS registered
+            )
+        # Should not fail on UDA check (may fail for other mock reasons, but not UDA)
+        assert result.get("code") != "validation_error" or "scope" not in result.get("message", "")
+
+    def test_builtin_fields_never_blocked(self, registry_with_uda_schema, mock_task_cli):
+        """Built-in fields (project, priority, due) are never flagged as unregistered."""
+        from unittest.mock import patch
+        from taskchampion_mcp.cli import CLIResult
+        mock_task_cli.add_task.return_value = CLIResult(returncode=0, stdout="Created.", stderr="")
+        with patch("taskchampion_mcp.tools.validate_task", return_value=[]):
+            result = registry_with_uda_schema.create_task(
+                description="Task with builtins only",
+                project="personal.test",
+                priority="H",
+            )
+        # No UDA fields used → UDA check should not trigger
+        if result.get("error"):
+            assert "unregistered" not in result.get("message", "")
+
+    def test_error_message_includes_registration_hint(self, registry_with_uda_schema):
+        """Error message tells the user how to fix the .taskrc."""
+        result = registry_with_uda_schema.create_task(
+            description="Test",
+            scope="personal",
+        )
+        assert result["error"] is True
+        assert ".taskrc" in result["message"]
+        assert "uda." in result["message"]
+
+    def test_uda_cache_populated_at_init(self, mock_config, mock_task_cli, mock_rate_limiter, mock_audit):
+        """_registered_udas is populated from task_cli.udas() at construction."""
+        mock_task_cli.udas.return_value = ["scope", "area", "phase"]
+        schema = _schema_with_uda("scope")
+        schema.enum_fields = lambda: {}
+        schema.required_field_names = lambda: []
+        registry = ToolRegistry(
+            config=mock_config, task_cli=mock_task_cli, timew_cli=None,
+            schema=schema, rate_limiter=mock_rate_limiter, audit=mock_audit,
+        )
+        assert "scope" in registry._registered_udas
+        assert "area" in registry._registered_udas
+        mock_task_cli.udas.assert_called()
+
+    def test_uda_cache_graceful_on_cli_failure(
+        self, mock_config, mock_task_cli, mock_rate_limiter, mock_audit
+    ):
+        """If task _udas fails, _registered_udas is empty but no exception raised."""
+        mock_task_cli.udas.side_effect = Exception("task not available")
+        schema = _schema_with_uda("scope")
+        schema.enum_fields = lambda: {}
+        schema.required_field_names = lambda: []
+        registry = ToolRegistry(
+            config=mock_config, task_cli=mock_task_cli, timew_cli=None,
+            schema=schema, rate_limiter=mock_rate_limiter, audit=mock_audit,
+        )
+        assert registry._registered_udas == set()
+
+
+class TestCreateSubtaskUdaValidation:
+    """create_subtask must apply the same UDA pre-flight check as create_task."""
+
+    def test_unregistered_uda_blocked_in_subtask(
+        self, registry_with_uda_schema, mock_task_cli
+    ):
+        parent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        mock_task_cli.get_task.return_value = {
+            "uuid": parent_uuid.lower(),
+            "description": "Parent",
+        }
+        result = registry_with_uda_schema.create_subtask(
+            parent_uuid=parent_uuid,
+            description="Sub",
+            scope="personal",   # UDA not registered
+        )
+        assert result["error"] is True
+        assert result["code"] == "validation_error"
+        assert "scope" in result["message"]
+
+    def test_registered_uda_passes_in_subtask(
+        self, registry_with_registered_uda, mock_task_cli
+    ):
+        from unittest.mock import patch
+        from taskchampion_mcp.cli import CLIResult
+        parent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        mock_task_cli.get_task.return_value = {
+            "uuid": parent_uuid.lower(),
+            "description": "Parent",
+        }
+        mock_task_cli.add_task.return_value = CLIResult(returncode=0, stdout="Created.", stderr="")
+        with patch("taskchampion_mcp.tools.validate_task", return_value=[]):
+            result = registry_with_registered_uda.create_subtask(
+                parent_uuid=parent_uuid,
+                description="Sub",
+                scope="personal",
+            )
+        assert result.get("code") != "validation_error" or "scope" not in result.get("message", "")
+
+
+class TestModifyTaskUdaValidation:
+    """modify_task must block modifications that set unregistered UDA fields."""
+
+    def test_unregistered_uda_blocked_in_modify(
+        self, registry_with_uda_schema, mock_task_cli
+    ):
+        result = registry_with_uda_schema.modify_task(
+            uuid="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            fields={"scope": "personal"},   # UDA not registered
+        )
+        assert result["error"] is True
+        assert result["code"] == "validation_error"
+        assert "scope" in result["message"]
+
+    def test_tags_add_remove_not_flagged(
+        self, registry_with_uda_schema, mock_task_cli
+    ):
+        """tags_add and tags_remove are special modify-only keys, not UDAs."""
+        from unittest.mock import patch
+        from taskchampion_mcp.cli import CLIResult
+        mock_task_cli.modify_task.return_value = CLIResult(returncode=0, stdout="", stderr="")
+        result = registry_with_uda_schema.modify_task(
+            uuid="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            fields={"tags_add": ["linux"]},
+        )
+        # tags_add must not be treated as unregistered UDA
+        if result.get("error"):
+            assert "tags_add" not in result.get("message", "")
