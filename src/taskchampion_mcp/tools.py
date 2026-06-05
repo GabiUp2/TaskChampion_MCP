@@ -27,7 +27,12 @@ from taskchampion_mcp.sanitizer import (
     sanitize_tag,
     sanitize_uuid,
 )
-from taskchampion_mcp.schema import TaskSchema, validate_task
+from taskchampion_mcp.schema import (
+    TASKWARRIOR_BUILTIN_FIELDS,
+    TaskSchema,
+    get_unregistered_uda_fields,
+    validate_task,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,6 +161,26 @@ class ToolRegistry:
         self.audit = audit
         self._config_path = config_path
 
+        # Cache registered UDAs for fast pre-flight validation on every
+        # task create/modify call.  Refreshed by reload().
+        import logging as _logging
+        _logger = _logging.getLogger("taskchampion_mcp")
+        try:
+            self._registered_udas: set[str] = set(task_cli.udas())
+        except Exception:
+            self._registered_udas = set()
+
+        _missing_udas = get_unregistered_uda_fields(schema, self._registered_udas)
+        if _missing_udas:
+            _logger.warning(
+                "Schema '%s' references UDA fields not registered in .taskrc: %s. "
+                "Task creation using these fields will be blocked. "
+                "Register them with 'uda.<name>.type=string' in your .taskrc "
+                "and reload the server.",
+                schema.name,
+                _missing_udas,
+            )
+
     @property
     def initialized(self) -> bool:
         """True when both role and schema are explicitly configured."""
@@ -210,6 +235,19 @@ class ToolRegistry:
             override_rc=new_config.taskwarrior_override_rc,
         )
         reloaded.append("task_cli")
+
+        try:
+            self._registered_udas = set(self.task.udas())
+        except Exception:
+            self._registered_udas = set()
+
+        _missing_udas = get_unregistered_uda_fields(self.schema, self._registered_udas)
+        if _missing_udas:
+            _logger.warning(
+                "Schema '%s' references UDA fields not registered in .taskrc: %s.",
+                self.schema.name,
+                _missing_udas,
+            )
 
         timew_instance = TimewarriorCLI(binary=new_config.timew_binary)
         self.timew = timew_instance if timew_instance.available() else None
@@ -392,6 +430,30 @@ class ToolRegistry:
                     sanitized[key] = sanitize_enum(value, key, self.schema.enum_fields()[key])
                 else:
                     sanitized[key] = sanitize_field_value(value, key)
+            # Pre-flight UDA registration check for modify operations.
+            _unregistered = [
+                k for k in sanitized
+                if k not in TASKWARRIOR_BUILTIN_FIELDS
+                and k not in ("tags_add", "tags_remove")
+                and k not in self._registered_udas
+            ]
+            if _unregistered:
+                _msg = (
+                    f"Fields {_unregistered} are not registered as UDAs in "
+                    ".taskrc. Add 'uda.<name>.type=string' (and optionally "
+                    "'uda.<name>.label=<Label>') to your .taskrc, then reload "
+                    "the server."
+                )
+                self._log(
+                    "modify_task", params, "unregistered UDA fields",
+                    False, 0, _msg, result_code="validation_error",
+                )
+                return _make_coded_error(
+                    _msg,
+                    "validation_error",
+                    details={"unregistered_fields": _unregistered},
+                )
+
             if self._effective_dry_run(dry_run):
                 self._log("modify_task", params, "dry_run", True, 0, result_code="dry_run")
                 return _make_success(
@@ -656,6 +718,32 @@ class ToolRegistry:
                     else:
                         task_data[key] = sanitize_field_value(value, key)
 
+            # Pre-flight: block task creation if any non-builtin field is not
+            # a registered UDA in .taskrc.  This catches mismatches between a
+            # file-provided schema and the user's actual .taskrc configuration
+            # before the CLI produces a cryptic or silent failure.
+            _unregistered = [
+                k for k in task_data
+                if k not in TASKWARRIOR_BUILTIN_FIELDS
+                and k not in self._registered_udas
+            ]
+            if _unregistered:
+                _msg = (
+                    f"Fields {_unregistered} are not registered as UDAs in "
+                    ".taskrc. Add 'uda.<name>.type=string' (and optionally "
+                    "'uda.<name>.label=<Label>') to your .taskrc, then reload "
+                    "the server."
+                )
+                self._log(
+                    "create_task", params, "unregistered UDA fields",
+                    False, 0, _msg, result_code="validation_error",
+                )
+                return _make_coded_error(
+                    _msg,
+                    "validation_error",
+                    details={"unregistered_fields": _unregistered},
+                )
+
             validation_errors = validate_task(task_data, self.schema)
             if validation_errors:
                 self._log(
@@ -767,6 +855,29 @@ class ToolRegistry:
                         task_data[key] = sanitize_enum(value, key, self.schema.enum_fields()[key])
                     else:
                         task_data[key] = sanitize_field_value(value, key)
+
+            # Pre-flight UDA registration check (mirrors create_task).
+            _unregistered = [
+                k for k in task_data
+                if k not in TASKWARRIOR_BUILTIN_FIELDS
+                and k not in self._registered_udas
+            ]
+            if _unregistered:
+                _msg = (
+                    f"Fields {_unregistered} are not registered as UDAs in "
+                    ".taskrc. Add 'uda.<name>.type=string' (and optionally "
+                    "'uda.<name>.label=<Label>') to your .taskrc, then reload "
+                    "the server."
+                )
+                self._log(
+                    "create_subtask", params, "unregistered UDA fields",
+                    False, 0, _msg, result_code="validation_error",
+                )
+                return _make_coded_error(
+                    _msg,
+                    "validation_error",
+                    details={"unregistered_fields": _unregistered},
+                )
 
             validation_errors = validate_task(task_data, self.schema)
             if validation_errors:
