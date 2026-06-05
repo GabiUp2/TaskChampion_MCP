@@ -40,6 +40,11 @@ def mock_schema():
     schema.version = "1.0.0"
     schema.enum_fields.return_value = {}
     schema.required_field_names.return_value = []
+    # ToolRegistry.__init__ calls get_unregistered_uda_fields(schema, ...)
+    # which unpacks schema.fields and schema.llm_provenance_fields as dicts.
+    # MagicMock(spec=...) doesn't expose dataclass instance attrs by default.
+    schema.fields = {}
+    schema.llm_provenance_fields = {}
     return schema
 
 
