@@ -10,7 +10,7 @@ from taskchampion_mcp.audit import AuditLogger
 from taskchampion_mcp.cli import CLIResult, TaskwarriorCLI
 from taskchampion_mcp.config import ServerConfig
 from taskchampion_mcp.rate_limiter import RateLimiter
-from taskchampion_mcp.schema import TaskSchema
+from taskchampion_mcp.schema import FieldDef, TaskSchema
 from taskchampion_mcp.tools import ToolRegistry
 
 
@@ -489,12 +489,10 @@ class TestToolsCoverageSprint:
 # UDA pre-flight validation tests (bug fix: schema-vs-.taskrc mismatch)
 # ---------------------------------------------------------------------------
 
-from taskchampion_mcp.schema import FieldDef, TaskSchema as _TaskSchema  # noqa: E402
 
-
-def _schema_with_uda(uda_name: str) -> _TaskSchema:
+def _schema_with_uda(uda_name: str) -> TaskSchema:
     """Build a minimal schema that declares one UDA field."""
-    schema = _TaskSchema(name="test_uda_schema")
+    schema = TaskSchema(name="test_uda_schema")
     schema.fields["description"] = FieldDef(name="description", required=True, uda=False)
     schema.fields[uda_name] = FieldDef(name=uda_name, required=False, uda=True)
     return schema
@@ -552,8 +550,6 @@ class TestCreateTaskUdaValidation:
 
     def test_registered_uda_passes(self, registry_with_registered_uda, mock_task_cli):
         """Passing a UDA field that IS registered proceeds past the UDA check."""
-        from unittest.mock import patch
-        from taskchampion_mcp.cli import CLIResult
         mock_task_cli.add_task.return_value = CLIResult(returncode=0, stdout="Created.", stderr="")
         with patch("taskchampion_mcp.tools.validate_task", return_value=[]):
             result = registry_with_registered_uda.create_task(
@@ -565,8 +561,6 @@ class TestCreateTaskUdaValidation:
 
     def test_builtin_fields_never_blocked(self, registry_with_uda_schema, mock_task_cli):
         """Built-in fields (project, priority, due) are never flagged as unregistered."""
-        from unittest.mock import patch
-        from taskchampion_mcp.cli import CLIResult
         mock_task_cli.add_task.return_value = CLIResult(returncode=0, stdout="Created.", stderr="")
         with patch("taskchampion_mcp.tools.validate_task", return_value=[]):
             result = registry_with_uda_schema.create_task(
@@ -588,7 +582,9 @@ class TestCreateTaskUdaValidation:
         assert ".taskrc" in result["message"]
         assert "uda." in result["message"]
 
-    def test_uda_cache_populated_at_init(self, mock_config, mock_task_cli, mock_rate_limiter, mock_audit):
+    def test_uda_cache_populated_at_init(
+        self, mock_config, mock_task_cli, mock_rate_limiter, mock_audit
+    ):
         """_registered_udas is populated from task_cli.udas() at construction."""
         mock_task_cli.udas.return_value = ["scope", "area", "phase"]
         schema = _schema_with_uda("scope")
@@ -640,8 +636,6 @@ class TestCreateSubtaskUdaValidation:
     def test_registered_uda_passes_in_subtask(
         self, registry_with_registered_uda, mock_task_cli
     ):
-        from unittest.mock import patch
-        from taskchampion_mcp.cli import CLIResult
         parent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         mock_task_cli.get_task.return_value = {
             "uuid": parent_uuid.lower(),
@@ -675,8 +669,6 @@ class TestModifyTaskUdaValidation:
         self, registry_with_uda_schema, mock_task_cli
     ):
         """tags_add and tags_remove are special modify-only keys, not UDAs."""
-        from unittest.mock import patch
-        from taskchampion_mcp.cli import CLIResult
         mock_task_cli.modify_task.return_value = CLIResult(returncode=0, stdout="", stderr="")
         result = registry_with_uda_schema.modify_task(
             uuid="a1b2c3d4-e5f6-7890-abcd-ef1234567890",
