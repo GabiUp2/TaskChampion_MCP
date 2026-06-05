@@ -170,16 +170,19 @@ class ToolRegistry:
         except Exception:
             self._registered_udas = set()
 
-        _missing_udas = get_unregistered_uda_fields(schema, self._registered_udas)
-        if _missing_udas:
-            _logger.warning(
-                "Schema '%s' references UDA fields not registered in .taskrc: %s. "
-                "Task creation using these fields will be blocked. "
-                "Register them with 'uda.<name>.type=string' in your .taskrc "
-                "and reload the server.",
-                schema.name,
-                _missing_udas,
-            )
+        try:
+            _missing_udas = get_unregistered_uda_fields(schema, self._registered_udas)
+            if _missing_udas:
+                _logger.warning(
+                    "Schema '%s' references UDA fields not registered in .taskrc: %s. "
+                    "Task creation using these fields will be blocked. "
+                    "Register them with 'uda.<name>.type=string' in your .taskrc "
+                    "and reload the server.",
+                    schema.name,
+                    _missing_udas,
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _logger.debug("Could not check schema UDA fields: %s", _exc)
 
     @property
     def initialized(self) -> bool:
@@ -241,13 +244,16 @@ class ToolRegistry:
         except Exception:
             self._registered_udas = set()
 
-        _missing_udas = get_unregistered_uda_fields(self.schema, self._registered_udas)
-        if _missing_udas:
-            _logger.warning(
-                "Schema '%s' references UDA fields not registered in .taskrc: %s.",
-                self.schema.name,
-                _missing_udas,
-            )
+        try:
+            _missing_udas = get_unregistered_uda_fields(self.schema, self._registered_udas)
+            if _missing_udas:
+                _logger.warning(
+                    "Schema '%s' references UDA fields not registered in .taskrc: %s.",
+                    self.schema.name,
+                    _missing_udas,
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _logger.debug("Could not check schema UDA fields: %s", _exc)
 
         timew_instance = TimewarriorCLI(binary=new_config.timew_binary)
         self.timew = timew_instance if timew_instance.available() else None
