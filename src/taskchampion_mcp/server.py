@@ -445,10 +445,20 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def propose_initialization_options(project_dir: str = "") -> str:
-        """Return onboarding choices for the user/model to discuss.
+        """Return structured onboarding choices for the user/model to discuss.
 
-        Options include using a taxonomy file, inferring from existing tasks,
-        combining both, or selecting a bundled preset.
+        Read-only: does not write config, schema, or task data.
+
+        Call after get_initialization_status confirms onboarding is required.
+        Use this to present a structured schema-source menu rather than
+        guessing a path. For the next step, choose one of:
+          analyze_existing_tasks_for_schema — infer schema from tasks
+          analyze_taxonomy_file             — parse a taxonomy Markdown file
+          list_preset_schemas / use_preset_schema — bundled presets
+          generate_initial_schema_preview   — combine taxonomy + tasks
+
+        project_dir: optional path scoping task analysis to a project
+        subdirectory. Pass empty string (default) to analyse all tasks.
         """
         params = {"project_dir": project_dir or None}
 
@@ -501,11 +511,19 @@ def _register_onboarding_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         project_dir: str = "",
         schema_name: str = "",
     ) -> str:
-        """Generate a reviewable schema TOML preview without writing files.
+        """Generate a reviewable schema TOML preview without writing any files.
 
-        The preview combines existing task analysis and, when available, a
-        taxonomy Markdown file. The returned schema_toml should be reviewed by
-        the user before calling save_initial_schema.
+        Read-only: returns a preview string only; no files are created or
+        modified. Call save_initial_schema only after the user approves.
+
+        The preview combines existing task analysis with an optional taxonomy
+        Markdown file. Run analyze_existing_tasks_for_schema or
+        analyze_taxonomy_file first to understand what the preview will contain.
+
+        taxonomy_path: absolute path to a taxonomy Markdown file; omit to
+          infer from tasks only.
+        project_dir: optional path scoping task analysis to a subdirectory.
+        schema_name: optional name embedded in the schema [meta] block.
         """
         params = {
             "taxonomy_path": taxonomy_path or None,
@@ -660,14 +678,19 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
     def list_tasks(
         filters: str = "",
     ) -> str:
-        """List and filter Taskwarrior tasks.
+        """List and filter Taskwarrior tasks. Read-only.
 
-        Returns tasks as JSON. Use Taskwarrior filter syntax:
-        - 'status:pending' — pending tasks
-        - 'project:work' — tasks in project 'work'
-        - 'phase:impl' — tasks in implementation phase
-        - '+python' — tasks tagged 'python'
-        Combine filters: 'status:pending project:work phase:impl'
+        Returns a JSON array of matching tasks. Use Taskwarrior filter syntax:
+          'status:pending'  — pending tasks (default without filter)
+          'project:work'    — tasks in project 'work'
+          'phase:impl'      — tasks where UDA phase=impl
+          '+python'         — tasks tagged 'python'
+          '-python'         — tasks NOT tagged 'python'
+        Combine: 'status:pending project:work +urgent'
+
+        Prefer get_task when you have a UUID and need full field data.
+        Prefer search_tasks for free-text search within a specific field.
+        Use get_task_report for named Taskwarrior reports (next, blocked).
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -676,10 +699,14 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_task(uuid: str) -> str:
-        """Get a single task by its UUID.
+        """Get a single task by UUID and return all its fields. Read-only.
 
-        Returns full task details including all fields and annotations.
-        Always use UUID (not local ID) for reliable identification.
+        Returns full task JSON including all UDA fields and annotations.
+        Always use UUID — local numeric IDs change as tasks complete or
+        are filtered.
+
+        Use this over list_tasks when you have the UUID and need complete
+        field data. Use list_tasks with filters to discover tasks.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -691,12 +718,17 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         query: str,
         field: str = "description",
     ) -> str:
-        """Search tasks by a specific field.
+        """Search tasks by matching a query against a specific field. Read-only.
 
-        Args:
-            query: The search term.
-            field: Field to search in. Options: 'description',
-                   'project', 'tags', or any UDA name.
+        Returns matching tasks as JSON. Matching is case-insensitive substring.
+
+        field defaults to 'description'. Other values: 'project', 'tags',
+        or any UDA name (e.g. 'phase', 'scope', 'area'). The field must
+        exist in the schema or be a Taskwarrior built-in.
+
+        Use list_tasks with filter syntax for structured queries.
+        Use this for free-text search when filter syntax is insufficient
+        or when searching across a UDA field.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -705,10 +737,18 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def annotate_task(uuid: str, annotation: str, dry_run: bool | None = None) -> str:
-        """Add an annotation (note, link, or context) to a task.
+        """Append a timestamped annotation to a task.
 
-        Annotations are the preferred way to add narrative context,
-        rationale, and reference links to tasks.
+        Annotations are appended to the task's annotation list —
+        they do not replace existing annotations or modify other fields.
+        Each annotation records the current timestamp automatically.
+
+        Annotations are the preferred way to attach narrative context,
+        rationale, URLs, and reference links. Use modify_task to change
+        structured fields like priority or project instead.
+
+        Supports dry_run=true to preview without writing. Requires
+        CONTRIBUTOR role.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -737,10 +777,15 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def start_task(uuid: str, dry_run: bool | None = None) -> str:
-        """Start working on a task.
+        """Mark a task as active by setting its start timestamp.
 
-        If Timewarrior hook is installed, this also starts
-        time tracking with the task's tags.
+        Sets the Taskwarrior 'start' field, making the task appear in
+        active-task reports. If Timewarrior is installed, also begins
+        time tracking tagged with the task's tags.
+
+        Supports dry_run=true to preview without mutation. Does not
+        complete or delete the task. Use stop_task to deactivate,
+        complete_task to mark done. Requires CONTRIBUTOR role.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -749,10 +794,15 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def stop_task(uuid: str, dry_run: bool | None = None) -> str:
-        """Stop working on a task.
+        """Deactivate a task by clearing its start timestamp.
 
-        If Timewarrior hook is installed, this also stops
-        time tracking for the task.
+        Clears the Taskwarrior 'start' field. If Timewarrior is installed,
+        also stops active time tracking for this task.
+
+        Supports dry_run=true to preview without mutation. Does not
+        complete or delete the task. Pair with start_task to track work
+        sessions. Use complete_task to mark the task done. Requires
+        CONTRIBUTOR role.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -761,7 +811,12 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_projects() -> str:
-        """List all project names in the Taskwarrior database."""
+        """List all project names in the Taskwarrior database. Read-only.
+
+        Returns a flat list including subproject hierarchies
+        (e.g. 'work.acme.backend'). Use before create_task or filter
+        queries to confirm project name spelling.
+        """
         gate = _gate_initialized(reg)
         if gate:
             return gate
@@ -769,7 +824,12 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_tags() -> str:
-        """List all tags used in the Taskwarrior database."""
+        """List all tags used across the Taskwarrior database. Read-only.
+
+        Returns every tag that appears on at least one task. Use before
+        create_task, modify_task, or filter queries to confirm tag spelling
+        and discover available tags.
+        """
         gate = _gate_initialized(reg)
         if gate:
             return gate
@@ -777,7 +837,13 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_active_context() -> str:
-        """Show the currently active Taskwarrior context filter."""
+        """Show the currently active Taskwarrior context filter. Read-only.
+
+        A context automatically applies a filter to all task queries.
+        Returns the active context name and its filter expression, or
+        indicates no context is active. An active context narrows the
+        output of list_tasks and get_task_report automatically.
+        """
         gate = _gate_initialized(reg)
         if gate:
             return gate
@@ -798,11 +864,17 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_task_report(report_name: str, filters: str = "") -> str:
-        """Run a named Taskwarrior report with optional filters.
+        """Run a named Taskwarrior report and return its output. Read-only.
 
-        Examples:
-        - report_name='next'
-        - report_name='blocked', filters='project:work'
+        Built-in report names: 'next', 'blocked', 'overdue', 'active',
+        'completed', 'all', 'summary', 'burndown.daily'. Custom reports
+        defined in .taskrc are also supported.
+
+        filters: Taskwarrior filter syntax appended to the report's own
+          filter (e.g. 'project:work' to scope 'next' to one project).
+
+        Use list_tasks for raw JSON output. Use this tool when the
+        formatted report view or urgency ordering is more useful.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -811,11 +883,17 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_time_summary(period: str = ":day") -> str:
-        """Get Timewarrior time tracking summary.
+        """Get a Timewarrior time-tracking summary for a period. Read-only.
 
-        Args:
-            period: Time period — ':day', ':week', ':month',
-                    or a date range like '2026-05-01 - 2026-05-25'.
+        Returns empty results (not an error) if Timewarrior is not
+        installed or no time was tracked in the given period.
+
+        period accepts:
+          ':day', ':week', ':month', ':year' — relative periods
+          '2026-05-01 - 2026-05-25'          — explicit date range
+          'monday - today'                    — Timewarrior relative syntax
+
+        Use get_time_status to check whether tracking is currently active.
         """
         gate = _gate_initialized(reg)
         if gate:
@@ -824,7 +902,15 @@ def _register_contributor_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def get_time_status() -> str:
-        """Check if Timewarrior is currently tracking time."""
+        """Check whether Timewarrior is currently tracking time. Read-only.
+
+        Returns active tracking state, current tags, and elapsed duration,
+        or indicates no tracking is active. Returns a clear message
+        (not an error) if Timewarrior is not installed.
+
+        Use get_time_summary for historical aggregates. Use start_task /
+        stop_task to control tracking via Taskwarrior hooks.
+        """
         gate = _gate_initialized(reg)
         if gate:
             return gate
@@ -1139,9 +1225,17 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def undo_last_action(dry_run: bool | None = None, confirm_token: str = "") -> str:
-        """Undo the last Taskwarrior operation.
+        """Undo the most recent Taskwarrior operation.
 
-        Reverts the most recent change. Use with caution.
+        Reverts the last change in Taskwarrior's undo log. Only one level
+        of undo is available — cannot be chained, and there is no redo.
+
+        Supports dry_run=true to preview what would be undone without
+        applying it. Destructive: the reverted change cannot be recovered.
+        May require a confirm_token depending on server configuration.
+
+        Caution: after batch operations, undo reverts only the last single
+        operation, not the whole batch. Requires MANAGER role.
         """
         gate = _gate_role(reg, Role.MANAGER)
         if gate:
@@ -1150,9 +1244,15 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
 
     @mcp.tool()
     def sync_tasks(dry_run: bool | None = None) -> str:
-        """Trigger task sync with the TaskChampion sync server.
+        """Trigger a sync with the configured TaskChampion sync server.
 
-        Pushes local changes and pulls remote changes.
+        Pushes local task changes to the sync server and pulls remote
+        changes. Requires a TaskChampion sync server configured in .taskrc.
+        Returns an error if no sync server is configured.
+
+        Supports dry_run=true to check connectivity without transferring
+        data. Conflicts are resolved server-side; local changes are not
+        lost but may be reordered. Requires MANAGER role.
         """
         gate = _gate_role(reg, Role.MANAGER)
         if gate:
@@ -1166,9 +1266,20 @@ def _register_manager_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         dry_run: bool | None = None,
         confirm_token: str = "",
     ) -> str:
-        """Modify all tasks matching filters.
+        """Modify all tasks matching a filter expression in a single call.
 
-        Supports dry-run previews and confirmation for high-impact changes.
+        Applies the same field changes to every matching task. NON-ATOMIC:
+        tasks are modified sequentially; a failure on one task does not
+        stop the batch. High-impact changes require a confirm_token —
+        call with dry_run=true first to receive the token, then resubmit
+        with confirm_token set.
+
+        filters: Taskwarrior filter syntax (required, e.g. 'project:work +urgent').
+        fields: field/value pairs — same format as modify_task.
+          For tags: {"tags_add": ["label"]} or {"tags_remove": ["label"]}.
+
+        Use modify_task for targeted single-task changes. Use dry_run=true
+        to preview affected task count before committing. Requires MANAGER.
         """
         gate = _gate_role(reg, Role.MANAGER)
         if gate:
