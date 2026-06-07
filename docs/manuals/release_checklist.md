@@ -16,6 +16,9 @@ Related: [`.github/workflows/publish.yml`](../../.github/workflows/publish.yml),
 | `server.json` → top-level `version` | Same as PyPI | `1.0.0rc1` |
 | `server.json` → `packages[].version` | Same as PyPI | `1.0.0rc1` |
 | Git tag | SemVer with `v` prefix | `v1.0.0-rc1` |
+| `README.md` → `**Latest release:**` line | `vX.Y.Z` with tag link | `v1.0.2` |
+| `README.md` → supported targets table (each row) | `vX.Y.Z` | `v1.0.2` |
+| `README.md` → docs table release notes link | `vX.Y.Z.md` | `v1.0.2.md` |
 
 Git tags and PyPI versions **may differ in punctuation** (`v1.0.0-rc1` vs `1.0.0rc1`) — that is normal. The **package metadata must match what you intend to publish**, not just the tag name.
 
