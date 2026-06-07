@@ -1064,10 +1064,26 @@ def _register_generator_tools(mcp: FastMCP, reg: ToolRegistry) -> None:
         tasks: list[dict[str, object]],
         dry_run: bool | None = None,
     ) -> str:
-        """Create many tasks in one call.
+        """Create multiple tasks in a single call with per-task result reporting.
 
-        Each entry supports the same shape as create_task:
-        description, project, priority, tags, due, extra_fields.
+        Prefer this over repeated create_task calls when creating several
+        independent tasks at once. Use create_subtask instead when tasks must
+        be linked to a parent via depends. Requires GENERATOR role.
+
+        NON-ATOMIC: tasks are created sequentially. If task N fails, tasks
+        0..N-1 are already committed — there is no rollback. A rate-limit
+        hit stops the batch early; partial results are returned with the
+        stopping index and created/failed counts.
+
+        dry_run=true previews all entries without writing to Taskwarrior.
+        Each preview entry confirms field validation without mutation.
+
+        Each entry in `tasks` accepts:
+          description (str, required), project (str), priority (H/M/L),
+          tags (list[str] or comma-separated str), due (ISO or TW relative
+          e.g. eow/eom), extra_fields (dict of UDA key/value pairs).
+
+        Call get_schema_info first to confirm required and available fields.
         """
         gate = _gate_role(reg, Role.GENERATOR)
         if gate:
