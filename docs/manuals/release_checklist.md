@@ -17,6 +17,7 @@ Related: [`.github/workflows/publish.yml`](../../.github/workflows/publish.yml),
 | `server.json` → `packages[].version` | Same as PyPI | `1.0.0rc1` |
 | Git tag | SemVer with `v` prefix | `v1.0.0-rc1` |
 | `README.md` → `**Latest release:**` line | `vX.Y.Z` with tag link | `v1.0.2` |
+| `glama.json` | No version — one-time ownership claim file; never needs bumping | — |
 | `README.md` → supported targets table (each row) | `vX.Y.Z` | `v1.0.2` |
 | `README.md` → docs table release notes link | `vX.Y.Z.md` | `v1.0.2.md` |
 
@@ -438,3 +439,97 @@ uv run pytest tests/targets/ -m acceptance -v
 ---
 
 *Sections 12–13 added 2026-06-07 after v1.0.2 patch release.*
+
+---
+
+## 14. Glama marketplace checklist
+
+[Glama](https://glama.ai/mcp/servers) is an MCP server directory that provides
+a quality score badge, security scans, and one-click deployment for users.
+This section covers both the one-time setup and the per-release steps.
+
+### 14a. One-time setup (do once, not per release)
+
+**Claim ownership:**
+
+- [ ] Add `glama.json` to the repo root:
+      ```json
+      {
+        "$schema": "https://glama.ai/mcp/schemas/server.json",
+        "maintainers": ["GabiUp2"]
+      }
+      ```
+- [ ] After merging to `main`, go to the **Claim** flow at
+      `https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/score`
+      to trigger Glama to pick up the file.
+- [ ] Alternatively, authenticate with GitHub directly at the same URL
+      (works for personal accounts, not orgs).
+
+**Configure build spec** (at `https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/admin/dockerfile`):
+
+Glama auto-detects a `uv sync` build spec from `pyproject.toml`/`uv.lock` and
+may bypass the repo `Dockerfile`. The working build spec (as of v1.0.2):
+
+```json
+{
+  "baseImage": "debian:trixie-slim",
+  "buildSteps": [
+    "apt-get update && apt-get install -y --no-install-recommends taskwarrior && rm -rf /var/lib/apt/lists/*",
+    "mkdir -p /root/.task && printf 'data.location=/root/.task\nconfirmation=no\n' > /root/.taskrc",
+    "uv sync"
+  ],
+  "cmdArguments": ["mcp-proxy", "--", "uv", "run", "taskchampion-mcp-server"],
+  "nodeVersion": "24",
+  "pythonVersion": "3.14"
+}
+```
+
+Notes:
+- `taskwarrior` from Debian trixie installs 2.6.2 (not 3.x). The server handles
+  this gracefully with a warning; Glama's introspection passes regardless.
+- `uv run taskchampion-mcp-server` is required — bare `taskchampion-mcp-server`
+  fails because `uv sync` puts the binary in `.venv/bin/` which is not on PATH.
+
+**Add related servers** in the Glama admin UI — tag 3–5 servers from the
+directory that are similar (task/project management) or complementary
+(calendar, notes, time tracking).
+
+**Add to awesome-mcp-servers** (`https://github.com/punkpeye/awesome-mcp-servers`):
+- Entry format requires a Glama score badge.
+- Badge URL: `https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/badges/score.svg`
+- The entry in the PR branch already includes the badge.
+
+### 14b. Per-release steps (every version bump)
+
+- [ ] Go to the Glama admin Dockerfile page:
+      `https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/admin/dockerfile`
+- [ ] Click **Deploy** — triggers a build test using the saved build spec.
+- [ ] Wait for the build test to show **success** (check instance logs confirm
+      server starts and responds to MCP introspection).
+- [ ] Click **Make Release** / **Create Release** on the passing test.
+- [ ] Enter the version number (e.g. `1.0.2`) and an optional changelog summary.
+- [ ] Click **Create & Publish Release**.
+- [ ] Confirm the listing shows **A for quality** at
+      `https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/score`.
+
+### 14c. Build spec troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `spawn taskchampion-mcp-server ENOENT` | Binary not on PATH after `uv sync` | Use `uv run taskchampion-mcp-server` in `cmdArguments` |
+| `Taskwarrior not found on PATH` | `task` binary not installed | Add apt install step to `buildSteps` |
+| Coherence tests failing | Tool descriptions, schemas, or server metadata inconsistent | Check the failing test detail; usually a tool description or output schema issue |
+| Release not picked up / quality not updating | Build spec changed but no new release created | Re-deploy and create a new release |
+
+### 14d. Scoring categories to monitor
+
+Glama scores servers on: **license**, **quality**, **maintenance**, and
+per-tool sub-scores. Current status as of v1.0.2: A on license, A on
+maintenance, A on quality (post-release). Tool scores vary — check
+`https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/score` after each
+release for the latest sub-scores and any flagged issues.
+
+---
+
+*Section 14 added 2026-06-08 after initial Glama submission and v1.0.2 release.*
+
