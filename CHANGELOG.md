@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-06-07
+
+### Fixed
+
+- **Schema UDA field validation against `.taskrc`.** When a schema is loaded
+  from a TOML file (bundled preset, author example, or manually authored),
+  `create_task`, `create_subtask`, and `modify_task` now validate that any
+  non-builtin field is registered as a UDA in `.taskrc` before calling the
+  TaskWarrior CLI. Previously, unregistered fields were silently dropped or
+  produced cryptic CLI errors. The server now returns a structured
+  `validation_error` with explicit registration instructions
+  (`uda.<name>.type=string`). A startup warning is also logged when a schema
+  references fields absent from `.taskrc`. Schemas auto-generated from
+  existing tasks are unaffected — they can only contain fields TaskWarrior
+  already holds. (`#33`)
+
+  New public surface in `schema.py`: `TASKWARRIOR_BUILTIN_FIELDS` (frozenset),
+  `get_unregistered_uda_fields(schema, registered_udas) -> list[str]`.
+  New method in `cli.py`: `TaskwarriorCLI.udas() -> list[str]`.
+
 ## [1.0.1] - 2026-06-03
 
 ### Added
@@ -81,6 +101,8 @@ First stable release. Ships the four primary stdio targets (Claude Desktop, Wind
 - Onboarding completion and reconfiguration flows stabilised.
 - Config precedence, observability, and error envelope contracts formalised.
 
+[1.0.2]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.2
+[1.0.1]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.1
 [1.0.0]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0
 [0.3.2]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v0.3.2
 [0.3.1]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v0.3.1
