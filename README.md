@@ -11,6 +11,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.GabiUp2/taskchampion-mcp)
+[![Glama](https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/badges/score.svg)](https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP)
 
 **Latest release:** [v1.0.2](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.2) — [`pip install taskchampion-mcp`](https://pypi.org/project/taskchampion-mcp/) / `uvx taskchampion-mcp`
 
