@@ -9,6 +9,10 @@ import pytest
 # test follows the package layout wherever it moves next.
 from taskchampion_mcp.config import default_schema_dir  # noqa: E402
 from taskchampion_mcp.schema import (
+    TASKWARRIOR_BUILTIN_FIELDS,
+    FieldDef,
+    TaskSchema,
+    get_unregistered_uda_fields,
     list_available_schemas,
     load_schema,
     validate_task,
@@ -151,3 +155,124 @@ class TestValidateTask:
         }
         errors = validate_task(task, custom_schema)
         assert any("client" in e for e in errors)
+
+
+class TestTaskwarriorBuiltinFields:
+    def test_common_builtins_present(self):
+        for field in ("description", "project", "priority", "tags", "due", "status"):
+            assert field in TASKWARRIOR_BUILTIN_FIELDS
+
+    def test_uda_fields_absent(self):
+        # UDA fields like scope/area/phase must NOT be in the builtin set
+        for field in ("scope", "area", "phase", "effort", "confidence", "hypothesis"):
+            assert field not in TASKWARRIOR_BUILTIN_FIELDS
+
+
+class TestGetUnregisteredUdaFields:
+    """Tests for the schema-vs-taskrc UDA consistency check (bug fix)."""
+
+    def _make_schema(self, fields: dict) -> TaskSchema:
+        """Build a minimal TaskSchema with the given field definitions."""
+        schema = TaskSchema(name="test")
+        for name, uda in fields.items():
+            schema.fields[name] = FieldDef(name=name, uda=uda)
+        return schema
+
+    # ------------------------------------------------------------------
+    # Basic correctness
+    # ------------------------------------------------------------------
+
+    def test_empty_schema_returns_empty(self):
+        schema = TaskSchema(name="empty")
+        assert get_unregistered_uda_fields(schema, set()) == []
+
+    def test_builtin_only_schema_returns_empty(self):
+        """Built-in fields never need UDA registration."""
+        schema = self._make_schema({"description": False, "project": False, "priority": False})
+        # Even with zero registered UDAs, no missing fields reported
+        assert get_unregistered_uda_fields(schema, set()) == []
+
+    def test_registered_uda_returns_empty(self):
+        """UDA present in .taskrc → no mismatch."""
+        schema = self._make_schema({"scope": True, "area": True})
+        registered = {"scope", "area", "phase"}
+        assert get_unregistered_uda_fields(schema, registered) == []
+
+    def test_unregistered_explicit_uda_returned(self):
+        """Field marked uda=True but absent from .taskrc → reported."""
+        schema = self._make_schema({"scope": True, "area": True})
+        registered: set[str] = set()
+        missing = get_unregistered_uda_fields(schema, registered)
+        assert "scope" in missing
+        assert "area" in missing
+
+    def test_unregistered_implicit_uda_returned(self):
+        """Non-builtin field without explicit uda=True is still treated as UDA."""
+        schema = self._make_schema({"myfancyfield": False})
+        missing = get_unregistered_uda_fields(schema, set())
+        assert "myfancyfield" in missing
+
+    def test_partial_registration(self):
+        """Only unregistered fields are returned, not already-registered ones."""
+        schema = self._make_schema({"scope": True, "area": True, "phase": True})
+        registered = {"scope"}  # area and phase are missing
+        missing = get_unregistered_uda_fields(schema, registered)
+        assert "scope" not in missing
+        assert "area" in missing
+        assert "phase" in missing
+
+    def test_result_is_sorted(self):
+        """Return value is alphabetically sorted for deterministic output."""
+        schema = self._make_schema({"zzz": True, "aaa": True, "mmm": True})
+        missing = get_unregistered_uda_fields(schema, set())
+        assert missing == sorted(missing)
+
+    def test_builtin_mixed_with_uda(self):
+        """Builtin fields are never flagged even when UDAs around them are missing."""
+        schema = self._make_schema({
+            "description": False,   # builtin — never flagged
+            "project": False,       # builtin — never flagged
+            "scope": True,          # UDA — flagged when unregistered
+        })
+        missing = get_unregistered_uda_fields(schema, set())
+        assert "description" not in missing
+        assert "project" not in missing
+        assert "scope" in missing
+
+    # ------------------------------------------------------------------
+    # Analysis-generated schemas pass trivially (regression guard)
+    # ------------------------------------------------------------------
+
+    def test_analysis_generated_schema_passes_with_its_own_fields(self):
+        """A schema generated from task analysis only contains fields that
+        TaskWarrior already knows about, so all its UDAs must be in .taskrc.
+        This test confirms that pattern: if we feed back the schema's own
+        field names as registered_udas, there are no mismatches."""
+        schema = load_schema("authors_custom_example", SCHEMAS_DIR)
+        # Simulate: every field name in the schema IS registered
+        registered = set(schema.fields.keys()) | set(schema.llm_provenance_fields.keys())
+        assert get_unregistered_uda_fields(schema, registered) == []
+
+    def test_preset_schema_with_empty_taskrc_reports_all_udas(self):
+        """A bundled preset schema loaded with zero registered UDAs reports
+        every non-builtin field — this is the core bug scenario."""
+        schema = load_schema("authors_custom_example", SCHEMAS_DIR)
+        missing = get_unregistered_uda_fields(schema, set())
+        # Must report UDA fields like scope, area, phase, effort, confidence
+        for expected in ("scope", "area", "phase"):
+            assert expected in missing, f"Expected '{expected}' in {missing}"
+        # Must NOT report builtins
+        for builtin in ("description", "project", "priority"):
+            assert builtin not in missing
+
+    def test_llm_provenance_fields_also_checked(self):
+        """llm_provenance_fields are also subject to UDA registration."""
+        schema = TaskSchema(name="prov_test")
+        schema.fields["description"] = FieldDef(name="description", uda=False)
+        schema.llm_provenance_fields["gen_model"] = FieldDef(name="gen_model", uda=True)
+        # gen_model not registered
+        missing = get_unregistered_uda_fields(schema, set())
+        assert "gen_model" in missing
+        # gen_model registered
+        missing2 = get_unregistered_uda_fields(schema, {"gen_model"})
+        assert "gen_model" not in missing2

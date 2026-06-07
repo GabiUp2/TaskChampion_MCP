@@ -40,7 +40,9 @@ def cfg():
 
 @pytest.fixture()
 def task_cli():
-    return MagicMock(spec=TaskwarriorCLI)
+    cli = MagicMock(spec=TaskwarriorCLI)
+    cli.udas.return_value = []
+    return cli
 
 
 @pytest.fixture()
@@ -50,6 +52,8 @@ def schema():
     s.version = "1.0.0"
     s.enum_fields.return_value = {}
     s.required_field_names.return_value = []
+    s.fields = {}
+    s.llm_provenance_fields = {}
     return s
 
 
@@ -258,6 +262,7 @@ class TestCreateTask:
     def test_create_task_with_all_fields(self, mock_validate, reg, task_cli, schema):
         mock_validate.return_value = []
         schema.enum_fields.return_value = {"custom": ["a", "b"]}
+        reg._registered_udas = {"custom"}  # seed UDA registration for this test
         task_cli.add_task.return_value = CLIResult(
             returncode=0, stdout="Created task 1.", stderr=""
         )
