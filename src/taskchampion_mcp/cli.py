@@ -208,6 +208,18 @@ class TaskwarriorCLI:
             return [t.strip() for t in result.stdout.strip().split("\n") if t.strip()]
         return []
 
+
+    def udas(self) -> list[str]:
+        """List all registered User Defined Attribute (UDA) names from .taskrc.
+
+        Uses ``task _udas`` which outputs one UDA name per line.
+        Returns an empty list if TaskWarrior reports no UDAs or the command fails.
+        """
+        result = _run(self._cmd("_udas"))
+        if result.ok and result.stdout.strip():
+            return [u.strip() for u in result.stdout.strip().split("\n") if u.strip()]
+        return []
+
     def context(self) -> str:
         """Get the active Taskwarrior context name."""
         result = _run(self._cmd("_get", "rc.context"))
