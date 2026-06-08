@@ -146,3 +146,11 @@
   - `auto_generated_from_tasks` — when only tasks are analyzed
   This helps users understand the source and quality of the generated schema.
 - **Status:** Captured for v0.1.0 implementation
+
+### IDEA-006: Web platform connector gateway for lower-cost LLM access
+- **Date:** 2026-06-08
+- **Author:** Human (gabiup2) + GPT-5.5 Thinking / ChatGPT web
+- **Description:** Add support for web LLM platforms on the path to TaskChampionMCP 2.0 so users are not limited to desktop IDEs or local clients. The target direction is an Athena/self-hosted remote gateway that can expose TaskChampionMCP safely to web platforms. Where remote MCP is supported, the gateway should provide an MCP-compatible endpoint. Where MCP is not available or is restricted by plan/platform, it should offer an OpenAPI/REST fallback suitable for Custom GPT Actions-style integrations.
+- **Security notes:** Do not expose raw Taskwarrior, raw TaskChampion data, or unrestricted MCP directly to the internet. The gateway should require HTTPS, bearer-token/OAuth-style authentication, read-only default mode, explicit confirmation for destructive writes, audit logging, and preferably VPN/IP restrictions or a tunnel provider.
+- **Candidate shape:** `taskchampion-remote-gateway` with endpoints such as `/mcp`, `/openapi`, and a narrow REST surface (`GET /tasks`, `GET /tasks/{uuid}`, `POST /tasks`, `PATCH /tasks/{uuid}`, `POST /tasks/{uuid}/done`).
+- **Status:** Captured for v2.0 consideration
