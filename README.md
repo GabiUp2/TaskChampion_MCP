@@ -13,7 +13,7 @@
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.GabiUp2/taskchampion-mcp)
 [![Glama](https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP/badges/score.svg)](https://glama.ai/mcp/servers/GabiUp2/TaskChampion_MCP)
 
-**Latest release:** [v1.0.2](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.2) — [`pip install taskchampion-mcp`](https://pypi.org/project/taskchampion-mcp/) / `uvx taskchampion-mcp`
+**Latest release:** [v1.0.4](https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.4) — [`pip install taskchampion-mcp`](https://pypi.org/project/taskchampion-mcp/) / `uvx taskchampion-mcp`
 
 ---
 
@@ -29,11 +29,11 @@ TaskChampion MCP is a [Model Context Protocol](https://modelcontextprotocol.io) 
 
 | Platform | Transport | Status |
 |---|---|---|
-| **Neovim** (via Claude Code CLI) | stdio | v1.0.2 |
-| **Cursor** | stdio | v1.0.2 |
-| **Windsurf** | stdio | v1.0.2 |
-| **VS Code** (Copilot MCP) | stdio | v1.0.2 |
-| **Claude Desktop** | stdio | v1.0.2 |
+| **Neovim** (via Claude Code CLI) | stdio | v1.0.4 |
+| **Cursor** | stdio | v1.0.4 |
+| **Windsurf** | stdio | v1.0.4 |
+| **VS Code** (Copilot MCP) | stdio | v1.0.4 |
+| **Claude Desktop** | stdio | v1.0.4 |
 | **HTTP/SSE transports** | HTTP/SSE | Deferred to v1.x |
 
 **Requirements:**
@@ -164,7 +164,7 @@ We focus on the modern Taskwarrior 3.x + TaskChampion stack. Taskserver (taskd) 
 | [`docs/llm_context/`](docs/llm_context/) | LLM agent guidelines and tracked assumptions |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | How to contribute (branching, PRs, versioning) |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Feature roadmap (v0.1.0 → v1.0.0) |
-| [`docs/releases/v1.0.2.md`](docs/releases/v1.0.2.md) | v1.0.2 release notes and install links |
+| [`docs/releases/v1.0.4.md`](docs/releases/v1.0.4.md) | v1.0.2 release notes and install links |
 | [`docs/manuals/release_checklist.md`](docs/manuals/release_checklist.md) | Pre-tag publish checklist |
 | [`src/taskchampion_mcp/schemas/`](src/taskchampion_mcp/schemas/) | Bundled task schema presets (TOML) |
 | [`scripts/setup_remote.sh`](scripts/setup_remote.sh) | One-shot remote-host bootstrap |

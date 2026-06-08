@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-06-08
+
+### Changed
+
+- **Tool descriptions rewritten for agent clarity (18 tools).** All MCP tool
+  descriptions now explicitly disclose read-only status, mutation side effects,
+  atomicity behaviour, `dry_run` semantics, parameter intent beyond the schema,
+  and explicit usage guidance (when to use this tool vs siblings). Addresses
+  Glama Tool Definition Quality Score (TDQS) criteria across the full tool
+  surface. No functional code changes — this is a user-experience improvement
+  for LLM agents consuming the server.
+
+  Tools updated: `propose_initialization_options`, `generate_initial_schema_preview`,
+  `list_tasks`, `get_task`, `search_tasks`, `annotate_task`, `start_task`,
+  `stop_task`, `get_projects`, `get_tags`, `get_active_context`,
+  `get_task_report`, `get_time_summary`, `get_time_status`, `batch_create_tasks`,
+  `undo_last_action`, `sync_tasks`, `bulk_modify`.
+
+- **Glama score badge added to README.** Visible on the GitHub repo page and
+  the Glama listing.
+
 ## [1.0.2] - 2026-06-07
 
 ### Fixed
@@ -101,6 +122,7 @@ First stable release. Ships the four primary stdio targets (Claude Desktop, Wind
 - Onboarding completion and reconfiguration flows stabilised.
 - Config precedence, observability, and error envelope contracts formalised.
 
+[1.0.4]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.4
 [1.0.2]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.2
 [1.0.1]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.1
 [1.0.0]: https://github.com/GabiUp2/TaskChampion_MCP/releases/tag/v1.0.0
