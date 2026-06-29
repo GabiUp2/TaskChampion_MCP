@@ -142,13 +142,13 @@ How well-defined this task is. High confidence = clear scope, clear done criteri
 Affects urgency: `H` adds +1.0, `L` subtracts -1.5. Fuzzy tasks should not surface over clear ones.
 
 ### 2.9 `decides` — free string
-What architectural or design decision this task informs or resolves. Primarily for LLM consumption — enables clustering related research/testing tasks by the decision they feed into.
+What architectural or design decision this task informs or resolves. Primarily for LLM consumption — enables clustering related research/testing tasks by the decision they feed into. If software project follows/have 'ADRs' (Architectural Design Registry) add relevant ADR index to the decides.
 
 Examples:
 - `"backup solution for homelab"`
 - `"remote access method for homelab"`
-- `"LLM plugin choice for nvim"`
-- `"CI/CD approach for homelab services"`
+- `"LLM plugin choice for nvim, , ADR 19"`
+- `"CI/CD approach for homelab services, , ADR 20"`
 
 ### 2.10 `gen_model` — free string
 LLM model that generated or substantially contributed to this task's definition. Leave empty for human-authored tasks. Use the canonical model string.
@@ -204,6 +204,7 @@ Tags capture **cross-cutting concerns that UDAs don't cover** — primarily tech
 - Using tags as a second project system (use project hierarchy instead)
 - Capitalized tags (legacy — normalize to lowercase over time)
 - Using tags for things that are now UDAs (scope, phase, area, client)
+- Usage of Emoticons and out of keyboard characters.
 
 ---
 
